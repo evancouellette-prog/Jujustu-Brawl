@@ -1,7 +1,7 @@
 {
   "name": "jujutsu-brawl-online",
   "version": "1.0.0",
-  "description": "Jujutsu Brawl with online multiplayer WebSocket support.",
+  "description": "Jujutsu Brawl with online multiplayer WebSocket room support.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
