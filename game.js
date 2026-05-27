@@ -336,7 +336,9 @@ function isLocalAudioHost() {
 function canUseAudioTrack(track = getCurrentRadioTrack()) {
   if (!track || track.type !== "audio") return false;
   const src = track.src || "";
-  return isLocalAudioHost() || !src.endsWith("battle-music.mp3");
+  // Public-host fix: allow uploaded MP3 files on Render/online.
+  // Before, battle-music.mp3 was blocked outside localhost, which made Judas use generated fallback music.
+  return Boolean(src);
 }
 
 function updateBattleMusicState(restart = false) {
@@ -1559,8 +1561,21 @@ function applyFighterDamage(defender, damage) {
   if (amount <= 0) return 0;
   if (isPracticeDummy(defender)) {
     if (practiceSettings.dummyDamage) {
-      defender.health = Math.max(1, defender.health - amount);
+      defender.health = Math.max(0, defender.health - amount);
       defender.healthLagDelay = Math.max(defender.healthLagDelay || 0, 18);
+
+      // Practice dummy reset: refill HP after all bars are depleted,
+      // but keep the practice damage meter total going.
+      if (defender.health <= 0) {
+        defender.health = defender.maxHealth;
+        defender.delayedHealth = defender.maxHealth;
+        defender.healthLagDelay = 0;
+        defender.ko = false;
+        defender.lying = false;
+        defender.knockdown = false;
+        defender.knockdownTimer = 0;
+        defender.koTimer = 0;
+      }
     }
     updatePracticeDamageMeter();
     pinStationaryPracticeDummy(defender);
