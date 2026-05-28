@@ -1,3 +1,4 @@
+/* FULL UPDATED GAME.JS - generated with requested gameplay/UI/radio changes */
 const canvas = document.getElementById("game");
 let ctx = canvas.getContext("2d");
 const playerHealthEl = document.getElementById("playerHealth");
@@ -112,6 +113,18 @@ const message = document.getElementById("message");
 const messageTitle = document.getElementById("messageTitle");
 const messageCopy = document.getElementById("messageCopy");
 const countdownOverlay = document.getElementById("countdownOverlay");
+const settingsButtons = Array.from(document.querySelectorAll(".settings-button"));
+const settingsScreen = document.getElementById("settingsScreen");
+const settingsCloseButton = document.getElementById("settingsCloseButton");
+const buttonSfxVolumeSlider = document.getElementById("buttonSfxVolumeSlider");
+const gameSfxVolumeSlider = document.getElementById("gameSfxVolumeSlider");
+const usernameInput = document.getElementById("usernameInput");
+const PLAYER_NAME_STORAGE_KEY = "jujutsuBrawlPlayerName";
+const BUTTON_SFX_VOLUME_STORAGE_KEY = "jujutsuBrawlButtonSfxVolume";
+const GAME_SFX_VOLUME_STORAGE_KEY = "jujutsuBrawlGameSfxVolume";
+let localPlayerName = "Player";
+let buttonSfxVolume = 0.45;
+let gameSfxVolume = 0.75;
 
 let uiAudioContext = null;
 let displayedReadyCountdown = 0;
@@ -124,7 +137,7 @@ let musicMasterGain = null;
 const MUSIC_VOLUME_STORAGE_KEY = "jujutsuBrawlMusicVolume";
 const MUSIC_TRACK_STORAGE_KEY = "jujutsuBrawlMusicTrack";
 const RADIO_TRACKS = [
-{ title: "Judas", artist: "Lady Gaga", type: "audio", src: "assets/judas.mp3?v=3", style: "battle" },
+  { title: "Judas", artist: "Lady Gaga", type: "audio", src: "assets/judas.mp3?v=12", style: "battle" },
   { title: "If I Am With You", artist: "Yoshimasa Terui", type: "audio", src: "assets/if-i-am-with-you.mp3", style: "menu" },
   { title: "Kaikai Kitan", artist: "Eve", type: "audio", src: "assets/kaikai-kitan.mp3", style: "battle" },
   { title: "Inferno", artist: "Mrs. GREEN APPLE", type: "audio", src: "assets/inferno.mp3", style: "battle" },
@@ -146,7 +159,7 @@ countdownSound.volume = 0.95;
 const buttonClickSounds = Array.from({ length: 5 }, () => {
   const sound = new Audio("assets/button-click.mp3");
   sound.preload = "auto";
-  sound.volume = 0.45;
+  sound.volume = buttonSfxVolume;
   return sound;
 });
 let buttonClickSoundIndex = 0;
@@ -334,34 +347,45 @@ function isLocalAudioHost() {
 }
 
 function canUseAudioTrack(track = getCurrentRadioTrack()) {
-  if (!track || track.type !== "audio") return false;
-  const src = track.src || "";
-  // Public-host fix: allow uploaded MP3 files on Render/online.
-  // Before, battle-music.mp3 was blocked outside localhost, which made Judas use generated fallback music.
-  return Boolean(src);
+  return Boolean(track && track.type === "audio" && track.src);
 }
 
 function updateBattleMusicState(restart = false) {
   const track = getCurrentRadioTrack();
   const canPlayAudioTrack = canUseAudioTrack(track);
-  if (canPlayAudioTrack) {
-    const targetSrc = new URL(track.src, window.location.href).href;
-    if (battleMusic.src !== targetSrc) {
-      battleMusic.pause();
-      battleMusic.src = targetSrc;
-      battleMusic.currentTime = 0;
-      battleMusic.load();
-      updateMusicProgressUi();
-    } else if (restart && battleMusic.ended) {
-      battleMusic.currentTime = 0;
-      updateMusicProgressUi();
-    }
+
+  if (!canPlayAudioTrack) {
+    battleMusic.pause();
+    return;
   }
-  const shouldPlayUploadedTrack = backgroundMusicStarted && canPlayAudioTrack && !document.hidden && !musicMuted;
+
+  const targetSrc = new URL(track.src, window.location.href).href;
+
+  if (battleMusic.src !== targetSrc) {
+    battleMusic.pause();
+    battleMusic.src = targetSrc;
+    battleMusic.currentTime = 0;
+    battleMusic.load();
+    updateMusicProgressUi();
+  } else if (restart) {
+    try {
+      battleMusic.currentTime = 0;
+    } catch (err) {
+      console.warn("Could not restart music:", err);
+    }
+    updateMusicProgressUi();
+  }
+
   battleMusic.volume = getEffectiveMusicVolume();
-  if (shouldPlayUploadedTrack) {
+
+  const shouldPlay = backgroundMusicStarted && !document.hidden && !musicMuted;
+  if (shouldPlay) {
     const playPromise = battleMusic.play();
-    if (playPromise) playPromise.catch(() => {});
+    if (playPromise) {
+      playPromise.catch((err) => {
+        console.warn("Music play failed:", track.title, track.src, err);
+      });
+    }
   } else {
     battleMusic.pause();
   }
@@ -689,11 +713,37 @@ const H = canvas.height;
 const STAGE_W = 1600;
 const GROUND = 438;
 const NORMAL_JUMP_VELOCITY = -16.8;
-const platforms = [
-  { x: 255, y: 270, w: 260, h: 22 },
-  { x: 665, y: 240, w: 270, h: 22 },
-  { x: 1085, y: 270, w: 285, h: 22 }
+let platforms = [
+  { x: 255, y: 270, w: 260, h: 22, broken: false },
+  { x: 665, y: 240, w: 270, h: 22, broken: false },
+  { x: 1085, y: 270, w: 285, h: 22, broken: false }
 ];
+
+function isDroppingThroughPlatform(f) {
+  return Boolean(f && f.dropThroughPlatformTicks > 0);
+}
+
+function getActivePlatforms() {
+  return platforms.filter((platform) => !platform.broken);
+}
+
+function breakPlatformsNear(x, y, radius = ULT_PLATFORM_BREAK_RADIUS) {
+  let brokeAny = false;
+  getActivePlatforms().forEach((platform) => {
+    if (platform.broken) return;
+    const closestX = Math.max(platform.x, Math.min(platform.x + platform.w, x));
+    const closestY = Math.max(platform.y, Math.min(platform.y + platform.h, y));
+    const distance = Math.hypot(x - closestX, y - closestY);
+    if (distance <= radius) {
+      platform.broken = true;
+      brokeAny = true;
+      if (typeof groundEraseEffects !== "undefined") {
+        groundEraseEffects.push({ x: platform.x + platform.w / 2, y: platform.y + platform.h / 2, w: platform.w, h: platform.h, ticks: 36, maxTicks: 36 });
+      }
+    }
+  });
+  return brokeAny;
+}
 const GRAVITY = 0.78;
 const MAX_HEALTH = 200;
 const MAX_CE = 100;
@@ -728,6 +778,11 @@ const GOJO_BLUE_PUNCH_HOLD_TICKS = Math.round(0.6 * 60);
 const GOJO_BLUE_PUNCH_ACTIVE_TICKS = 10 * 60;
 const GOJO_BLUE_PUNCH_COOLDOWN_TICKS = 10 * 60;
 const GOJO_BLUE_PUNCH_MAX_CHASES = 3;
+const GOJO_LIGHT_FINISHER_COOLDOWN_TICKS = 5 * 60;
+const ULT_AIM_MIN_HOLD_TICKS = 60;
+const ULT_AIM_TOTAL_TICKS = 150;
+const ULT_PLATFORM_BREAK_RADIUS = 70;
+const PRACTICE_DUMMY_AUTO_KNOCKBACK_DEFAULT = true;
 const GOJO_PUSH_PULL_FINISHER_COOLDOWN_TICKS = 5 * 60;
 const FUGA_COOLDOWN_TICKS = 10 * 60;
 const FUGA_CHARGE_TICKS = 150;
@@ -756,13 +811,13 @@ const ULT_BLOCKED_DAMAGE_GAIN_SCALE = 0.14;
 const ULT_COMBO_GAIN = 4;
 const ULT_PERFECT_DODGE_GAIN = 10;
 const ULT_BLOCK_DRAIN_PER_TICK = 0.035;
-const HOLLOW_PURPLE_STARTUP_TICKS = 58;
-const HOLLOW_PURPLE_RECOVERY_TICKS = 64;
-const WORLD_SLASH_STARTUP_TICKS = 34;
-const WORLD_SLASH_RECOVERY_TICKS = 46;
-const HOLLOW_PURPLE_DAMAGE = 178;
+const HOLLOW_PURPLE_STARTUP_TICKS = 150;
+const HOLLOW_PURPLE_RECOVERY_TICKS = 52;
+const WORLD_SLASH_STARTUP_TICKS = 150;
+const WORLD_SLASH_RECOVERY_TICKS = 52;
+const HOLLOW_PURPLE_DAMAGE = 132;
 const HOLLOW_PURPLE_BLOCK_CHIP = 0.56;
-const WORLD_SLASH_DAMAGE = 188;
+const WORLD_SLASH_DAMAGE = 132;
 const WORLD_SLASH_BLOCK_CHIP = 0.62;
 const DOMAIN_CE_REQUIREMENT_RATIO = 0.9;
 const DOMAIN_STARTUP_TICKS = 150;
@@ -830,7 +885,8 @@ const practiceSettings = {
   infiniteCe: false,
   dummyDamage: true,
   noCooldowns: false,
-  stationaryDummy: true
+  stationaryDummy: true,
+  dummyAutoKnockback: PRACTICE_DUMMY_AUTO_KNOCKBACK_DEFAULT
 };
 let practiceDamageTotal = 0;
 let selectedTechnique = "limitless";
@@ -948,12 +1004,12 @@ function shouldShowChargePreview(f) {
 
 const cpuSettings = {
   easy: {
-    attackChance: 0.24,
-    blockChance: 0.16,
-    dodgeChance: 0.04,
+    attackChance: 0.18,
+    blockChance: 0.12,
+    dodgeChance: 0.03,
     jumpChance: 0.1,
     heavyChance: 0.12,
-    techniqueChance: 0.18,
+    techniqueChance: 0.12,
     platformChance: 0.12,
     dashChance: 0.02,
     comboChance: 0.04,
@@ -967,18 +1023,18 @@ const cpuSettings = {
     preferredRange: 250,
     spacingBand: 75,
     blockDistance: 78,
-    healthMultiplier: 0.78,
-    damageMultiplier: 0.92,
-    speedMultiplier: 0.92,
+    healthMultiplier: 0.72,
+    damageMultiplier: 0.82,
+    speedMultiplier: 0.86,
     prediction: 3
   },
   medium: {
-    attackChance: 0.48,
-    blockChance: 0.48,
-    dodgeChance: 0.18,
+    attackChance: 0.42,
+    blockChance: 0.40,
+    dodgeChance: 0.14,
     jumpChance: 0.3,
     heavyChance: 0.32,
-    techniqueChance: 0.4,
+    techniqueChance: 0.32,
     platformChance: 0.46,
     dashChance: 0.16,
     comboChance: 0.22,
@@ -992,9 +1048,9 @@ const cpuSettings = {
     preferredRange: 320,
     spacingBand: 85,
     blockDistance: 98,
-    healthMultiplier: 1.08,
+    healthMultiplier: 1.0,
     damageMultiplier: 1,
-    speedMultiplier: 1.06,
+    speedMultiplier: 1.0,
     prediction: 8
   },
   hard: {
@@ -1072,7 +1128,7 @@ function getAttackSpec(f, type = f.attacking) {
 const techniqueMoves = {
   blue: { cost: 22, damage: 7, speed: 10.5, radius: 24, knockback: -18, life: 78 },
   red: { cost: 28, damage: 12, speed: 12, radius: 20, knockback: 23, life: 70 },
-  slash: { cost: 18, damage: 10, speed: 13, radius: 20, knockback: 12, life: 66 },
+  slash: { cost: 18, damage: 13, speed: 13, radius: 20, knockback: 12, life: 66 },
   cleave: { cost: 32, damage: 24, speed: 0, radius: 42, knockback: 22, life: 14 },
   fuga: { cost: 70, damage: 76, speed: 9.2, radius: 20, knockback: 38, life: 100, explosionRadius: 174, cooldown: FUGA_COOLDOWN_TICKS }
 };
@@ -1268,6 +1324,7 @@ function makeFighter(config) {
     bluePunchCooldown: 0,
     bluePunchChases: 0,
     bluePunchFlash: 0,
+    gojoLightFinisherCooldown: 0,
     gojoPushPullTimer: 0,
     gojoPushPullAnchorX: null,
     gojoPushPullAnchorY: null,
@@ -1617,9 +1674,9 @@ function getControlledTechniqueForControls() {
 
 function getTechniqueControlHtml(technique) {
   if (technique === "shrine") {
-    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Both Clicks</kbd> Fuga</span><span><kbd>C</kbd> World Cutting Slash</span><span><kbd>R</kbd> hold RCT</span>';
+    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Hold S</kbd> Fuga</span><span><kbd>C</kbd> World Cutting Slash</span><span><kbd>R</kbd> hold RCT</span>';
   }
-  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Both Clicks</kbd> Teleport</span><span><kbd>Hold S</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>C</kbd> Hollow Purple</span><span><kbd>R</kbd> hold RCT</span>';
+  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Hold S</kbd> Teleport</span><span><kbd>Hold T</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>C</kbd> Hollow Purple</span><span><kbd>R</kbd> hold RCT</span>';
 }
 
 function updateControlsPanel() {
@@ -2673,7 +2730,7 @@ function getTakenKnockback(defender, rawKnockback, options = {}) {
 function resolvePlatformCollisions(f, prevX, prevY) {
   let landed = false;
   f.onPlatform = false;
-  for (const platform of platforms) {
+  for (const platform of getActivePlatforms()) {
     const prevLeft = prevX;
     const prevRight = prevX + f.w;
     const prevBottom = prevY + f.h;
@@ -3087,7 +3144,7 @@ function getTeleportDestination(f, aimPoint = null) {
 function resolveTeleportLanding(f) {
   f.grounded = false;
   f.onPlatform = false;
-  for (const platform of platforms) {
+  for (const platform of getActivePlatforms()) {
     if (!rectsOverlap(f, platform)) continue;
     const fighterCenter = getFighterCenter(f);
     const platformCenter = { x: platform.x + platform.w / 2, y: platform.y + platform.h / 2 };
@@ -5401,7 +5458,7 @@ function getCpuAimPoint(cpu) {
 function getPlatformNearestX(x) {
   let best = null;
   let bestDistance = Infinity;
-  for (const platform of platforms) {
+  for (const platform of getActivePlatforms()) {
     const center = platform.x + platform.w / 2;
     const distance = Math.abs(center - x);
     if (distance < bestDistance) {
@@ -6061,7 +6118,7 @@ function drawCity() {
 }
 
 function drawPlatforms() {
-  for (const platform of platforms) {
+  for (const platform of getActivePlatforms()) {
     const metal = ctx.createLinearGradient(0, platform.y, 0, platform.y + platform.h);
     metal.addColorStop(0, "#cbd5e1");
     metal.addColorStop(0.18, "#9ca3af");
@@ -8676,7 +8733,7 @@ battleMusic.addEventListener("play", updateMusicProgressUi);
 battleMusic.addEventListener("pause", updateMusicProgressUi);
 battleMusic.addEventListener("error", () => {
   const track = getCurrentRadioTrack();
-  console.warn("Music failed to load:", track?.title, track?.src);
+  console.warn("Music failed to load, but auto-skip is disabled:", track?.title, track?.src, battleMusic.error);
 });
 techniqueButtons.forEach((button) => {
   button.addEventListener("click", () => finishTechniqueSelect(button.dataset.technique));
