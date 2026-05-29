@@ -1,4 +1,4 @@
-/* Jujutsu Brawl updated by ChatGPT */
+/* FULL UPDATED GAME.JS - generated with requested gameplay/UI/radio changes */
 const canvas = document.getElementById("game");
 let ctx = canvas.getContext("2d");
 const playerHealthEl = document.getElementById("playerHealth");
@@ -122,9 +122,9 @@ const usernameInput = document.getElementById("usernameInput");
 const PLAYER_NAME_STORAGE_KEY = "jujutsuBrawlPlayerName";
 const BUTTON_SFX_VOLUME_STORAGE_KEY = "jujutsuBrawlButtonSfxVolume";
 const GAME_SFX_VOLUME_STORAGE_KEY = "jujutsuBrawlGameSfxVolume";
-let localPlayerName = loadSavedPlayerName();
-let buttonSfxVolume = loadSavedSfxVolume(BUTTON_SFX_VOLUME_STORAGE_KEY, 0.45);
-let gameSfxVolume = loadSavedSfxVolume(GAME_SFX_VOLUME_STORAGE_KEY, 0.75);
+let localPlayerName = "Player";
+let buttonSfxVolume = 0.45;
+let gameSfxVolume = 0.75;
 
 let uiAudioContext = null;
 let displayedReadyCountdown = 0;
@@ -155,7 +155,7 @@ battleMusic.loop = false;
 battleMusic.preload = "auto";
 const countdownSound = new Audio("assets/countdown.mp3");
 countdownSound.preload = "auto";
-countdownSound.volume = gameSfxVolume;
+countdownSound.volume = 0.95;
 const buttonClickSounds = Array.from({ length: 5 }, () => {
   const sound = new Audio("assets/button-click.mp3");
   sound.preload = "auto";
@@ -166,6 +166,39 @@ let buttonClickSoundIndex = 0;
 
 const MENU_MUSIC_STEP_SECONDS = 60 / 84 / 2;
 const BATTLE_MUSIC_STEP_SECONDS = 60 / 146 / 2;
+
+
+function loadSimpleVolumeSetting(key, fallback) {
+  try {
+    const saved = Number(window.localStorage.getItem(key));
+    if (Number.isFinite(saved)) return Math.max(0, Math.min(1, saved / 100));
+  } catch (err) {}
+  return fallback;
+}
+
+function saveSimpleVolumeSetting(key, value) {
+  try { window.localStorage.setItem(key, String(Math.round(value * 100))); } catch (err) {}
+}
+
+function openSettingsScreen() {
+  if (!settingsScreen) return;
+  if (buttonSfxVolumeSlider) buttonSfxVolumeSlider.value = String(Math.round(buttonSfxVolume * 100));
+  if (gameSfxVolumeSlider) gameSfxVolumeSlider.value = String(Math.round(gameSfxVolume * 100));
+  settingsScreen.classList.remove("hidden");
+}
+
+function closeSettingsScreen() {
+  if (settingsScreen) settingsScreen.classList.add("hidden");
+}
+
+function applySavedPlayerName() {
+  try {
+    const saved = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+    if (saved) localPlayerName = saved.slice(0, 18);
+  } catch (err) {}
+  if (usernameInput) usernameInput.value = localPlayerName === "Player" ? "" : localPlayerName;
+  if (playerNameEl && localPlayerName && localPlayerName !== "Player") playerNameEl.textContent = localPlayerName;
+}
 
 function getAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -198,30 +231,6 @@ function loadSavedMusicVolume() {
   } catch (err) {
     return 0.85;
   }
-}
-
-function loadSavedPlayerName() {
-  try {
-    const saved = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
-    return saved && saved.trim() ? saved.trim().slice(0, 18) : "Player";
-  } catch (err) {
-    return "Player";
-  }
-}
-
-function loadSavedSfxVolume(key, fallback) {
-  try {
-    const saved = Number(window.localStorage.getItem(key));
-    return Number.isFinite(saved) ? Math.max(0, Math.min(1, saved > 1 ? saved / 100 : saved)) : fallback;
-  } catch (err) {
-    return fallback;
-  }
-}
-
-function saveSfxVolume(key, value) {
-  try {
-    window.localStorage.setItem(key, String(Math.round(value * 100)));
-  } catch (err) {}
 }
 
 function loadSavedTrackIndex() {
@@ -513,7 +522,7 @@ function playGeneratedButtonClickSound() {
 function playCountdownSound(count) {
   if (count === 3) {
     countdownSound.currentTime = 0;
-    countdownSound.volume = gameSfxVolume;
+    countdownSound.volume = 0.95;
     const playPromise = countdownSound.play();
     if (playPromise) playPromise.catch(() => {});
   }
@@ -805,9 +814,10 @@ const GOJO_BLUE_PUNCH_MAX_CHASES = 3;
 const GOJO_LIGHT_FINISHER_COOLDOWN_TICKS = 5 * 60;
 const ULT_AIM_MIN_HOLD_TICKS = 60;
 const ULT_AIM_TOTAL_TICKS = 150;
-const ULT_PLATFORM_BREAK_RADIUS = 76;
-const ULT_PROJECTILE_SPEED = 9.2;
-const WORLD_SLASH_PROJECTILE_RADIUS = 38;
+const ULT_AIM_HOLD_TICKS = 120;
+const ULT_FINAL_CHARGE_TICKS = 60;
+const ULT_AIM_PREVIEW_ALPHA = 0.5;
+const ULT_PLATFORM_BREAK_RADIUS = 70;
 const PRACTICE_DUMMY_AUTO_KNOCKBACK_DEFAULT = true;
 const GOJO_PUSH_PULL_FINISHER_COOLDOWN_TICKS = 5 * 60;
 const FUGA_COOLDOWN_TICKS = 10 * 60;
@@ -842,9 +852,9 @@ const HOLLOW_PURPLE_RECOVERY_TICKS = 52;
 const WORLD_SLASH_STARTUP_TICKS = 150;
 const WORLD_SLASH_RECOVERY_TICKS = 52;
 const HOLLOW_PURPLE_DAMAGE = 118;
-const HOLLOW_PURPLE_BLOCK_CHIP = 0;
+const HOLLOW_PURPLE_BLOCK_CHIP = 0.56;
 const WORLD_SLASH_DAMAGE = 118;
-const WORLD_SLASH_BLOCK_CHIP = 0;
+const WORLD_SLASH_BLOCK_CHIP = 0.62;
 const DOMAIN_CE_REQUIREMENT_RATIO = 0.9;
 const DOMAIN_STARTUP_TICKS = 150;
 const DOMAIN_CLASH_WINDOW_TICKS = 180;
@@ -1002,8 +1012,9 @@ function updateMouseAimFromEvent(event) {
   mouseAimWorld = getMouseWorldPoint(event) || mouseAimWorld;
   if (gameState === "playing") {
     const fighter = getActiveMouseTechniqueFighter();
-    if (fighter && (fighter.chargingTechnique || mouseTechniqueHeld.ct1 || mouseTechniqueHeld.ct2)) {
+    if (fighter && (fighter.chargingTechnique || fighter.ultimateAiming || mouseTechniqueHeld.ct1 || mouseTechniqueHeld.ct2)) {
       setFighterTechniqueAim(fighter, mouseAimWorld);
+      if (fighter.ultimateAiming) fighter.ultimateAimPoint = mouseAimWorld;
     }
     if (fighter && mouseTechniqueHeld.teleport) {
       fighter.teleportAiming = true;
@@ -1012,10 +1023,6 @@ function updateMouseAimFromEvent(event) {
     if (fighter && mouseTechniqueHeld.fuga) {
       fighter.fugaAiming = true;
       fighter.techniqueAim = mouseAimWorld;
-    }
-    if (fighter && fighter.ultimateMove) {
-      fighter.techniqueAim = mouseAimWorld;
-      fighter.ultAimPoint = mouseAimWorld;
     }
   }
   return mouseAimWorld;
@@ -1034,54 +1041,54 @@ function shouldShowChargePreview(f) {
 
 const cpuSettings = {
   easy: {
-    attackChance: 0.16,
-    blockChance: 0.10,
-    dodgeChance: 0.025,
-    jumpChance: 0.08,
-    heavyChance: 0.08,
-    techniqueChance: 0.10,
-    platformChance: 0.08,
-    dashChance: 0.015,
-    comboChance: 0.025,
-    airHopChance: 0.015,
-    attackCooldown: 84,
-    techniqueCooldown: 112,
-    thinkCooldown: 52,
-    approachSpeed: 0.58,
-    retreatSpeed: 0.48,
-    strafeSpeed: 0.22,
-    preferredRange: 230,
-    spacingBand: 65,
-    blockDistance: 70,
-    healthMultiplier: 0.68,
-    damageMultiplier: 0.78,
-    speedMultiplier: 0.82,
-    prediction: 2
+    attackChance: 0.18,
+    blockChance: 0.12,
+    dodgeChance: 0.03,
+    jumpChance: 0.1,
+    heavyChance: 0.12,
+    techniqueChance: 0.12,
+    platformChance: 0.12,
+    dashChance: 0.02,
+    comboChance: 0.04,
+    airHopChance: 0.02,
+    attackCooldown: 64,
+    techniqueCooldown: 82,
+    thinkCooldown: 42,
+    approachSpeed: 0.68,
+    retreatSpeed: 0.58,
+    strafeSpeed: 0.32,
+    preferredRange: 250,
+    spacingBand: 75,
+    blockDistance: 78,
+    healthMultiplier: 0.72,
+    damageMultiplier: 0.82,
+    speedMultiplier: 0.86,
+    prediction: 3
   },
   medium: {
-    attackChance: 0.40,
-    blockChance: 0.36,
-    dodgeChance: 0.12,
-    jumpChance: 0.24,
-    heavyChance: 0.26,
-    techniqueChance: 0.30,
-    platformChance: 0.36,
-    dashChance: 0.11,
-    comboChance: 0.14,
-    airHopChance: 0.045,
-    attackCooldown: 44,
-    techniqueCooldown: 64,
-    thinkCooldown: 26,
-    approachSpeed: 0.90,
-    retreatSpeed: 0.68,
-    strafeSpeed: 0.38,
-    preferredRange: 300,
-    spacingBand: 80,
-    blockDistance: 88,
-    healthMultiplier: 0.96,
-    damageMultiplier: 0.94,
-    speedMultiplier: 0.96,
-    prediction: 6
+    attackChance: 0.42,
+    blockChance: 0.40,
+    dodgeChance: 0.14,
+    jumpChance: 0.3,
+    heavyChance: 0.32,
+    techniqueChance: 0.32,
+    platformChance: 0.46,
+    dashChance: 0.16,
+    comboChance: 0.22,
+    airHopChance: 0.07,
+    attackCooldown: 36,
+    techniqueCooldown: 52,
+    thinkCooldown: 20,
+    approachSpeed: 1.02,
+    retreatSpeed: 0.78,
+    strafeSpeed: 0.48,
+    preferredRange: 320,
+    spacingBand: 85,
+    blockDistance: 98,
+    healthMultiplier: 1.0,
+    damageMultiplier: 1,
+    speedMultiplier: 1.0,
+    prediction: 8
   },
   hard: {
     attackChance: 0.62,
@@ -1158,7 +1165,7 @@ function getAttackSpec(f, type = f.attacking) {
 const techniqueMoves = {
   blue: { cost: 22, damage: 7, speed: 10.5, radius: 24, knockback: -18, life: 78 },
   red: { cost: 28, damage: 12, speed: 12, radius: 20, knockback: 23, life: 70 },
-  slash: { cost: 18, damage: 14, speed: 13, radius: 20, knockback: 12, life: 66 },
+  slash: { cost: 18, damage: 13, speed: 13, radius: 20, knockback: 12, life: 66 },
   cleave: { cost: 32, damage: 24, speed: 0, radius: 42, knockback: 22, life: 14 },
   fuga: { cost: 70, damage: 76, speed: 9.2, radius: 20, knockback: 38, life: 100, explosionRadius: 174, cooldown: FUGA_COOLDOWN_TICKS }
 };
@@ -1244,6 +1251,10 @@ function getCameraTargetX() {
 }
 
 function getCameraFightCenter() {
+  if (cinematicZoomTicks > 0 && ultimateFocusOwner) {
+    const focus = ultimateFocusOwner === "player" ? player : enemy;
+    if (focus) return focus.x + focus.w / 2;
+  }
   const playerCenter = player.x + player.w / 2;
   const enemyCenter = enemy.x + enemy.w / 2;
   return (playerCenter + enemyCenter) / 2;
@@ -1256,7 +1267,8 @@ function getCameraTargetZoom() {
   const desiredWorldWidth = Math.min(STAGE_W, Math.max(W, maxX - minX + 260));
   const minZoom = W / STAGE_W;
   const baseZoom = Math.max(minZoom, Math.min(1, W / desiredWorldWidth));
-  return cinematicZoomTicks > 0 ? Math.max(minZoom, baseZoom * 0.84) : baseZoom;
+  if (cinematicZoomTicks > 0 && ultimateFocusOwner) return Math.max(minZoom, Math.min(1.2, Math.max(baseZoom, baseZoom * 1.18)));
+  return baseZoom;
 }
 
 function keepFightersInCamera() {
@@ -1302,6 +1314,7 @@ let groundEraseEffects = [];
 let ultimateChargeEffects = [];
 let ultimateScreenEffect = { ticks: 0, maxTicks: 0, kind: "" };
 let cinematicZoomTicks = 0;
+let ultimateFocusOwner = null;
 let pendingDomain = null;
 let activeDomain = null;
 let domainClash = null;
@@ -1332,6 +1345,10 @@ function makeFighter(config) {
     ultimateRecovery: 0,
     ultimateMove: null,
     ultimateHasReleased: false,
+    ultimateAiming: false,
+    ultimateAimTicks: 0,
+    ultimateFinalCharge: 0,
+    ultimateAimPoint: null,
     domainStartup: 0,
     domainAttemptType: null,
     ctLockTimer: 0,
@@ -1614,7 +1631,7 @@ function resetPracticeDamage() {
 }
 
 function pinStationaryPracticeDummy(f = enemy) {
-  if (!isPracticeDummy(f) || !practiceSettings.stationaryDummy || practiceSettings.dummyAutoKnockback) return;
+  if (!isPracticeDummy(f) || !practiceSettings.stationaryDummy) return;
   const homeX = Number.isFinite(f.practiceHomeX) ? f.practiceHomeX : STAGE_W / 2 - f.w / 2;
   f.x = homeX;
   f.y = GROUND - f.h;
@@ -1665,7 +1682,7 @@ function applyFighterDamage(defender, damage) {
       }
     }
     updatePracticeDamageMeter();
-    if (!practiceSettings.dummyAutoKnockback) pinStationaryPracticeDummy(defender);
+    pinStationaryPracticeDummy(defender);
     return amount;
   }
   defender.health = Math.max(0, defender.health - amount);
@@ -1704,9 +1721,9 @@ function getControlledTechniqueForControls() {
 
 function getTechniqueControlHtml(technique) {
   if (technique === "shrine") {
-    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Hold S</kbd> Fuga</span><span><kbd>C</kbd> World Cutting Slash</span><span><kbd>R</kbd> hold RCT</span>';
+    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Hold S</kbd> Fuga</span><span><kbd>Hold C</kbd> Aim Ultimate</span><span><kbd>R</kbd> hold RCT</span>';
   }
-  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Hold S</kbd> Teleport</span><span><kbd>Hold T</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>C</kbd> Hollow Purple</span><span><kbd>R</kbd> hold RCT</span>';
+  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Hold S</kbd> Teleport</span><span><kbd>Hold T</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>Hold C</kbd> Aim Ultimate</span><span><kbd>R</kbd> hold RCT</span>';
 }
 
 function updateControlsPanel() {
@@ -1977,6 +1994,8 @@ function connectOnline(room = onlineRoom, side = onlineSide) {
       if (data.action === "jump") jumpFighterWithMove(enemy, (remoteInput.right ? 1 : 0) - (remoteInput.left ? 1 : 0));
       if (data.action === "infinity") toggleInfinity(enemy);
       if (data.action === "ultimate") startUltimate(enemy);
+      if (data.action === "ultimate-start") beginUltimateAim(enemy, data.aim);
+      if (data.action === "ultimate-release") releaseUltimateAim(enemy, data.aim);
       if (data.action === "fuga-start") prepareFuga(enemy, data.aim);
       if (data.action === "fuga") startFuga(enemy, data.aim);
       if (data.action === "teleport-start") prepareTeleport(enemy, data.aim);
@@ -2067,7 +2086,7 @@ function getOnlineInput() {
     block: isPressed("q", "keyq"),
     rct: isPressed("r", "keyr"),
     heavy: isPressed("e", "keye"),
-    bluePunch: isPressed("t", "keyt")
+    bluePunch: isPressed("s", "keys")
   };
 }
 
@@ -2077,7 +2096,7 @@ function getOnlineAction(key, code, repeat) {
   if (key === "shift" || code === "shiftleft" || code === "shiftright") return "dodge";
   if ((key === " " || code === "space") && !repeat) return "jump";
   if ((key === "f" || code === "keyf") && !repeat && enemy?.technique === "limitless") return "infinity";
-  if ((key === "c" || code === "keyc") && !repeat) return "ultimate";
+  if ((key === "c" || code === "keyc") && !repeat) return "ultimate-start";
   return null;
 }
 
@@ -2157,25 +2176,6 @@ function handleTechniqueMouseUp(event) {
   }
   if (action === "ct1-release") releaseTechniqueInput(player, 1, aim);
   if (action === "ct2-release") releaseTechniqueInput(player, 2, aim);
-}
-
-
-function getActiveKeyboardSpecialFighter() {
-  return gameMode === "online" && onlineRole === "p2" ? enemy : player;
-}
-
-function beginKeyboardSpecialAim(f, aim = mouseAimWorld) {
-  if (!f || homeOpen || paused || gameState !== "playing") return false;
-  if (f.technique === "shrine") return prepareFuga(f, aim);
-  if (f.technique === "limitless") return prepareTeleport(f, aim);
-  return false;
-}
-
-function releaseKeyboardSpecialAim(f, aim = mouseAimWorld) {
-  if (!f || homeOpen || paused || gameState !== "playing") return false;
-  if (f.fugaAiming) return startFuga(f, aim);
-  if (f.teleportAiming) return performTeleport(f, aim);
-  return false;
 }
 
 function sendOnlineInput(action = null, aim = null) {
@@ -2324,6 +2324,7 @@ function sendOnlineState() {
 }
 
 function resetRoundActors() {
+  platforms.forEach((platform) => { platform.broken = false; });
   player = makeFighter({ x: 170, w: 50, h: 128, dir: 1, color: "#2563eb", accent: "#1d4ed8" });
   enemy = makeFighter({ x: STAGE_W - 230, w: 52, h: 128, dir: -1, color: "#dc2626", accent: "#991b1b" });
   projectiles = [];
@@ -2335,9 +2336,9 @@ function resetRoundActors() {
   worldSlashEffects = [];
   groundEraseEffects = [];
   ultimateChargeEffects = [];
-  platforms.forEach((platform) => { platform.broken = false; });
   ultimateScreenEffect = { ticks: 0, maxTicks: 0, kind: "" };
   cinematicZoomTicks = 0;
+  ultimateFocusOwner = null;
   pendingDomain = null;
   activeDomain = null;
   domainClash = null;
@@ -2412,7 +2413,7 @@ function startRound(nextState = "playing") {
 }
 
 function getPlayerLabel() {
-  return localPlayerName || "Player 1";
+  return "Player 1";
 }
 
 function getEnemyLabel() {
@@ -2768,7 +2769,7 @@ function getRayRectHitDistance(aimVector, maxDistance, radius, rect) {
 
 function getTakenDamage(defender, rawDamage) {
   const multiplier = defender.damageTakenMultiplier ?? 1;
-  return Math.max(0, Math.ceil(rawDamage * multiplier));
+  return Math.max(1, Math.ceil(rawDamage * multiplier));
 }
 
 function getTakenKnockback(defender, rawKnockback, options = {}) {
@@ -2781,6 +2782,8 @@ function resolvePlatformCollisions(f, prevX, prevY) {
   let landed = false;
   f.onPlatform = false;
   for (const platform of getActivePlatforms()) {
+    const prevLeft = prevX;
+    const prevRight = prevX + f.w;
     const prevBottom = prevY + f.h;
     const left = f.x;
     const right = f.x + f.w;
@@ -2801,7 +2804,9 @@ function resolvePlatformCollisions(f, prevX, prevY) {
       f.onPlatform = true;
       f.jumpsUsed = 0;
       landed = true;
+      continue;
     }
+
   }
   return landed;
 }
@@ -3188,10 +3193,6 @@ function resolveTeleportLanding(f) {
       f.y = platform.y - f.h;
       f.grounded = true;
       f.onPlatform = true;
-    } else if (fighterCenter.x < platformCenter.x) {
-      f.x = platform.x - f.w - 1;
-    } else {
-      f.x = platform.x + platform.w + 1;
     }
   }
   if (f.y + f.h >= GROUND) {
@@ -3583,13 +3584,10 @@ function updateRct(f) {
 
   const ceCost = getRctCeCostPerTick(f);
   const affordable = ceCost > 0 ? Math.min(1, f.ce / ceCost) : 1;
-  const barCount = Math.max(1, Math.round(f.healthBars || 1));
-  const barSize = f.maxHealth / barCount;
-  const currentBarCeiling = Math.min(f.maxHealth, Math.ceil(Math.max(1, f.health) / barSize) * barSize);
   f.ce = Math.max(0, f.ce - ceCost);
-  f.health = Math.min(currentBarCeiling, f.health + getRctHealPerTick(f) * affordable);
+  f.health = Math.min(f.maxHealth, f.health + getRctHealPerTick(f) * affordable);
   f.delayedHealth = Math.max(f.delayedHealth || f.health, f.health);
-  if (f.ce <= 0 || f.health >= currentBarCeiling) cancelRct(f, true);
+  if (f.ce <= 0 || f.health >= f.maxHealth) cancelRct(f, true);
 }
 
 function isHoldingShield(f) {
@@ -3664,7 +3662,7 @@ function drainBlockingUltimate(f) {
 }
 
 function isUltimateLocked(f) {
-  return Boolean(f && ((f.ultimateStartup || 0) > 0 || (f.ultimateRecovery || 0) > 0));
+  return Boolean(f && ((f.ultimateAiming || false) || (f.ultimateFinalCharge || 0) > 0 || (f.ultimateStartup || 0) > 0 || (f.ultimateRecovery || 0) > 0));
 }
 
 function canStartUltimate(f) {
@@ -3680,11 +3678,14 @@ function canStartUltimate(f) {
     !f.rctHealing &&
     !f.chargingTechnique &&
     !f.fugaAiming &&
+    !f.teleportAiming &&
     !f.blocking &&
     !isHoldingShield(f) &&
     f.stun <= 0 &&
     f.dodging <= 0 &&
-    !f.attacking
+    !f.attacking &&
+    !f.ultimateAiming &&
+    (f.ultimateFinalCharge || 0) <= 0
   );
 }
 
@@ -3705,7 +3706,7 @@ function playUltimateChargeSound(kind) {
 
 function triggerUltimateScreenEffect(kind, ticks) {
   ultimateScreenEffect = { kind, ticks, maxTicks: ticks };
-  cinematicZoomTicks = Math.max(cinematicZoomTicks, Math.round(ticks * 0.75));
+  cinematicZoomTicks = Math.max(cinematicZoomTicks, Math.round(ticks * 0.55));
 }
 
 function spawnUltimateChargeEffect(f, kind) {
@@ -3716,47 +3717,95 @@ function spawnUltimateChargeEffect(f, kind) {
     y: center.y - 4,
     dir: f.dir,
     kind,
-    life: kind === "hollowPurple" ? HOLLOW_PURPLE_STARTUP_TICKS : WORLD_SLASH_STARTUP_TICKS,
-    maxLife: kind === "hollowPurple" ? HOLLOW_PURPLE_STARTUP_TICKS : WORLD_SLASH_STARTUP_TICKS
+    life: ULT_FINAL_CHARGE_TICKS,
+    maxLife: ULT_FINAL_CHARGE_TICKS
   });
 }
 
-function startUltimate(f) {
+function startUltimate(f, aimPoint = null) {
+  if (!beginUltimateAim(f, aimPoint)) return false;
+  f.ultimateAimTicks = ULT_AIM_HOLD_TICKS;
+  return releaseUltimateAim(f, aimPoint || f.techniqueAim);
+}
+
+
+function beginUltimateAim(f, aimPoint = null) {
   if (!canStartUltimate(f)) return false;
   const kind = f.technique === "shrine" ? "worldSlash" : "hollowPurple";
-  f.ultimateMeter = 0;
+  const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.techniqueAim) || mouseAimWorld;
   f.ultimateMove = kind;
-  f.ultimateStartup = kind === "worldSlash" ? WORLD_SLASH_STARTUP_TICKS : HOLLOW_PURPLE_STARTUP_TICKS;
+  f.ultimateAiming = true;
+  f.ultimateAimTicks = 0;
+  f.ultimateFinalCharge = 0;
+  f.ultimateAimPoint = aim;
+  f.ultimateStartup = 0;
   f.ultimateRecovery = 0;
   f.ultimateHasReleased = false;
-  f.techniqueAim = sanitizeAimPoint(mouseAimWorld);
-  f.ultAimPoint = f.techniqueAim;
   f.attacking = null;
   f.attackFrame = 0;
   f.hasHit = false;
   f.queuedAttack = null;
   f.blocking = false;
-  f.vx *= 0.2;
+  f.vx *= 0.35;
+  if (aim) setFighterTechniqueAim(f, aim);
   resetCombo(f);
-  spawnUltimateChargeEffect(f, kind);
-  triggerUltimateScreenEffect(kind, f.ultimateStartup + 22);
-  playUltimateChargeSound(kind);
+  updateHud();
+  return true;
+}
+
+function cancelUltimateAim(f) {
+  if (!f || !f.ultimateAiming) return;
+  f.ultimateAiming = false;
+  f.ultimateAimTicks = 0;
+  f.ultimateAimPoint = null;
+  f.ultimateMove = null;
+}
+
+function releaseUltimateAim(f, aimPoint = null) {
+  if (!f || !f.ultimateAiming) return false;
+  const fullyCharged = (f.ultimateAimTicks || 0) >= ULT_AIM_HOLD_TICKS;
+  if (!fullyCharged) {
+    cancelUltimateAim(f);
+    return false;
+  }
+  const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.ultimateAimPoint) || sanitizeAimPoint(f.techniqueAim) || mouseAimWorld;
+  if (aim) setFighterTechniqueAim(f, aim);
+  f.ultimateAimPoint = aim;
+  f.ultimateAiming = false;
+  f.ultimateFinalCharge = ULT_FINAL_CHARGE_TICKS;
+  f.ultimateMeter = 0;
+  f.ultimateHasReleased = false;
+  f.blocking = false;
+  f.vx *= 0.2;
+  ultimateFocusOwner = getFighterOwner(f);
+  cinematicZoomTicks = Math.max(cinematicZoomTicks, ULT_FINAL_CHARGE_TICKS + 18);
+  spawnUltimateChargeEffect(f, f.ultimateMove);
+  playUltimateChargeSound(f.ultimateMove);
   updateHud();
   return true;
 }
 
 function updateUltimateState(f) {
   if (!f) return;
+  if (f.ultimateAiming) {
+    f.ultimateAimTicks = Math.min(ULT_AIM_HOLD_TICKS, (f.ultimateAimTicks || 0) + 1);
+    f.blocking = false;
+    f.vx *= 0.72;
+    if (f.ultimateAimPoint) setFighterTechniqueAim(f, f.ultimateAimPoint);
+    return;
+  }
+  if ((f.ultimateFinalCharge || 0) > 0) {
+    f.ultimateFinalCharge -= 1;
+    f.blocking = false;
+    f.vx *= 0.48;
+    if (f.ultimateAimPoint) setFighterTechniqueAim(f, f.ultimateAimPoint);
+    if (f.ultimateFinalCharge <= 0 && !f.ultimateHasReleased) releaseUltimate(f);
+    return;
+  }
   if (f.ultimateStartup > 0) {
     f.ultimateStartup -= 1;
     f.blocking = false;
-    f.stun = 0;
-    f.knockdown = false;
     f.vx *= 0.52;
-    if (f === getActiveMouseTechniqueFighter()) {
-      f.techniqueAim = sanitizeAimPoint(mouseAimWorld) || f.techniqueAim;
-      f.ultAimPoint = f.techniqueAim;
-    }
     if (f.ultimateStartup <= 0 && !f.ultimateHasReleased) releaseUltimate(f);
   }
   if (f.ultimateRecovery > 0) {
@@ -3777,14 +3826,15 @@ function releaseUltimate(f) {
 
 function releaseHollowPurple(f) {
   const center = getFighterCenter(f);
-  const aimVector = getTechniqueAimVector(f, "purple", f.ultAimPoint || f.techniqueAim || mouseAimWorld);
+  const aimVector = getTechniqueAimVector(f, "blue", f.ultimateAimPoint || f.techniqueAim);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
-  const origin = { x: center.x + aimVector.x * 46, y: center.y - 14 + aimVector.y * 12 };
-  const speed = ULT_PROJECTILE_SPEED;
+  const speed = 10.8;
   const radius = 48;
+  const origin = { x: center.x + aimVector.x * 54, y: center.y - 14 + aimVector.y * 22 };
   projectiles.push({
     owner: f === player ? "player" : "enemy",
     move: "purple",
+    ultimateProjectile: true,
     x: origin.x,
     y: origin.y,
     vx: aimVector.x * speed,
@@ -3793,7 +3843,7 @@ function releaseHollowPurple(f) {
     baseVy: aimVector.y * speed,
     radius,
     damage: Math.ceil(HOLLOW_PURPLE_DAMAGE * getOutgoingDamageMultiplier(f)),
-    knockback: 42,
+    knockback: 43,
     dir: aimVector.dir,
     aimX: aimVector.x,
     aimY: aimVector.y,
@@ -3802,30 +3852,29 @@ function releaseHollowPurple(f) {
     rangeStartY: origin.y,
     rangeEndX: origin.x + aimVector.x * STAGE_W,
     rangeEndY: origin.y + aimVector.y * STAGE_W,
-    maxTravel: STAGE_W,
+    maxTravel: STAGE_W * 1.05,
     traveled: 0,
-    life: 150,
+    life: 170,
     charge: 1,
-    hit: false,
-    breaksPlatforms: true
+    hit: false
   });
-  f.techniqueAim = null;
-  f.ultAimPoint = null;
   f.ultimateRecovery = HOLLOW_PURPLE_RECOVERY_TICKS;
-  shake = Math.max(shake, 16);
-  spawnHitSpark(origin.x, origin.y, f.dir, "purple");
+  f.ultimateAimPoint = null;
+  shake = Math.max(shake, 12);
+  spawnHitSpark(origin.x, origin.y, aimVector.dir, "purple");
 }
 
 function releaseWorldCuttingSlash(f) {
   const center = getFighterCenter(f);
-  const aimVector = getTechniqueAimVector(f, "worldSlash", f.ultAimPoint || f.techniqueAim || mouseAimWorld);
+  const aimVector = getTechniqueAimVector(f, "slash", f.ultimateAimPoint || f.techniqueAim);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
-  const origin = { x: center.x + aimVector.x * 46, y: center.y - 10 + aimVector.y * 10 };
-  const speed = ULT_PROJECTILE_SPEED;
-  const radius = WORLD_SLASH_PROJECTILE_RADIUS;
+  const speed = 11.2;
+  const radius = 42;
+  const origin = { x: center.x + aimVector.x * 48, y: center.y - 8 + aimVector.y * 18 };
   projectiles.push({
     owner: f === player ? "player" : "enemy",
     move: "worldSlash",
+    ultimateProjectile: true,
     x: origin.x,
     y: origin.y,
     vx: aimVector.x * speed,
@@ -3834,7 +3883,7 @@ function releaseWorldCuttingSlash(f) {
     baseVy: aimVector.y * speed,
     radius,
     damage: Math.ceil(WORLD_SLASH_DAMAGE * getOutgoingDamageMultiplier(f)),
-    knockback: 42,
+    knockback: 44,
     dir: aimVector.dir,
     aimX: aimVector.x,
     aimY: aimVector.y,
@@ -3843,29 +3892,16 @@ function releaseWorldCuttingSlash(f) {
     rangeStartY: origin.y,
     rangeEndX: origin.x + aimVector.x * STAGE_W,
     rangeEndY: origin.y + aimVector.y * STAGE_W,
-    maxTravel: STAGE_W,
+    maxTravel: STAGE_W * 1.05,
     traveled: 0,
-    life: 150,
-    hit: false,
-    breaksPlatforms: true
+    life: 160,
+    charge: 1,
+    hit: false
   });
-  worldSlashEffects.push({
-    x1: origin.x - aimVector.x * 46,
-    y1: origin.y - aimVector.y * 46,
-    x2: origin.x + aimVector.x * 86,
-    y2: origin.y + aimVector.y * 86,
-    radius,
-    dir: aimVector.dir,
-    life: 26,
-    maxLife: 26,
-    splitDelay: 5,
-    branches: []
-  });
-  f.techniqueAim = null;
-  f.ultAimPoint = null;
   f.ultimateRecovery = WORLD_SLASH_RECOVERY_TICKS;
-  shake = Math.max(shake, 16);
-  triggerUltimateScreenEffect("worldSlashRelease", 30);
+  f.ultimateAimPoint = null;
+  shake = Math.max(shake, 12);
+  spawnHitSpark(origin.x, origin.y, aimVector.dir, "slash");
 }
 
 function applyWorldSlashHit(attacker, defender, slash) {
@@ -3878,7 +3914,7 @@ function applyWorldSlashHit(attacker, defender, slash) {
   const baseDamage = blocked
     ? Math.ceil(WORLD_SLASH_DAMAGE * WORLD_SLASH_BLOCK_CHIP)
     : Math.ceil(WORLD_SLASH_DAMAGE * infinityFactor);
-  const damage = blocked ? 0 : getTakenDamage(defender, baseDamage);
+  const damage = getTakenDamage(defender, baseDamage);
   if (blocked) damageShield(defender, WORLD_SLASH_DAMAGE * 1.35);
   applyFighterDamage(defender, damage);
   cancelRct(defender, true);
@@ -4190,8 +4226,8 @@ function endActiveDomain() {
 function applyDomainCleave(ownerFighter, target) {
   if (!ownerFighter || !target || target.ko || target.dodging > 0) return;
   const blocked = isBlockingAttack(target, ownerFighter.dir);
-  const rawDamage = blocked ? 0 : 20;
-  const damage = blocked ? 0 : getTakenDamage(target, Math.ceil(rawDamage * getOutgoingDamageMultiplier(ownerFighter)));
+  const rawDamage = blocked ? 6 : 18;
+  const damage = getTakenDamage(target, Math.ceil(rawDamage * getOutgoingDamageMultiplier(ownerFighter)));
   if (blocked) damageShield(target, 38);
   applyFighterDamage(target, damage);
   cancelRct(target, true);
@@ -4854,7 +4890,7 @@ function applyHit(attacker, defender) {
   const gojoPushPullFinisher = attacker.technique === "limitless" && finalLightHit && !bluePunchActive && !blocked && (attacker.gojoPushPullCooldown || 0) <= 0;
   const rawAttackDamage = Math.ceil(attack.damage * getOutgoingDamageMultiplier(attacker));
   const scaledAttackDamage = blocked ? rawAttackDamage : Math.ceil(rawAttackDamage * getComboDamageScale(attacker));
-  const baseDamage = blocked ? 0 : scaledAttackDamage;
+  const baseDamage = blocked ? Math.ceil(scaledAttackDamage * 0.28) : scaledAttackDamage;
   const damage = getTakenDamage(defender, baseDamage);
   if (blocked) damageShield(defender, rawAttackDamage);
   const sukunaBarrageFinisher = attacker.technique === "shrine" && finalLightHit && !blocked;
@@ -5062,8 +5098,8 @@ function applyProjectileHit(projectile, defender) {
   if (pacifistBot && defender === enemy) markPracticeBotAttacked();
   const blocked = isBlockingAttack(defender, projectile.dir);
   const blockDamageScale = projectile.move === "purple" ? HOLLOW_PURPLE_BLOCK_CHIP : 0.3;
-  const baseDamage = blocked ? 0 : projectile.damage;
-  const damage = blocked ? 0 : getTakenDamage(defender, baseDamage);
+  const baseDamage = blocked ? Math.ceil(projectile.damage * blockDamageScale) : projectile.damage;
+  const damage = getTakenDamage(defender, baseDamage);
   if (blocked) damageShield(defender, projectile.damage);
   const projectileDamageDealt = applyFighterDamage(defender, damage);
   const ownerFighter = projectile.owner === "player" ? player : enemy;
@@ -5072,7 +5108,7 @@ function applyProjectileHit(projectile, defender) {
   }
   cancelRct(defender, true);
   defender.hurt = blocked ? 6 : 14;
-  defender.stun = projectile.move === "purple" || projectile.move === "worldSlash" ? 34 : projectile.move === "blue" ? 10 : projectile.move === "cleave" ? 20 : projectile.move === "fuga" ? 24 : 14;
+  defender.stun = projectile.move === "purple" ? 30 : projectile.move === "worldSlash" ? 30 : projectile.move === "blue" ? 10 : projectile.move === "cleave" ? 20 : projectile.move === "fuga" ? 24 : 14;
   if (!blocked) {
     defender.attacking = null;
     defender.attackFrame = 0;
@@ -5095,8 +5131,8 @@ function applyProjectileHit(projectile, defender) {
     defender.vy = Math.min(defender.vy, -7.8);
     spawnGroundErase(defender.x + defender.w / 2, 104);
   }
-  hitStopTicks = Math.max(hitStopTicks, blocked ? 3 : (projectile.move === "purple" || projectile.move === "worldSlash") ? HITSTOP_HEAVY + 5 : projectile.move === "cleave" || projectile.move === "fuga" ? HITSTOP_HEAVY : HITSTOP_LIGHT);
-  shake = blocked ? 4 : (projectile.move === "purple" || projectile.move === "worldSlash") ? 18 : projectile.move === "fuga" ? 13 : 8;
+  hitStopTicks = Math.max(hitStopTicks, blocked ? 3 : (projectile.move === "purple" || projectile.move === "worldSlash") ? HITSTOP_HEAVY + 4 : projectile.move === "cleave" || projectile.move === "fuga" ? HITSTOP_HEAVY : HITSTOP_LIGHT);
+  shake = blocked ? 4 : (projectile.move === "purple" || projectile.move === "worldSlash") ? 15 : projectile.move === "fuga" ? 13 : 8;
   spawnHitSpark(defender.x + defender.w / 2, defender.y + 48, pushDir, blocked ? "block" : projectile.move);
   if (projectile.move === "fuga") spawnFugaExplosion(projectile, false);
   updateHud();
@@ -5131,7 +5167,7 @@ function applyFugaExplosionDamage(projectile, defender) {
   const blocked = isBlockingAttack(defender, projectile.dir);
   const falloff = Math.max(0.35, 1 - distance / Math.max(1, radius) * 0.55);
   const baseDamage = Math.ceil(projectile.damage * 0.48 * falloff);
-  const damage = blocked ? 0 : getTakenDamage(defender, baseDamage);
+  const damage = getTakenDamage(defender, blocked ? Math.ceil(baseDamage * 0.3) : baseDamage);
   if (blocked) damageShield(defender, projectile.damage * 0.8);
   const explosionDamageDealt = applyFighterDamage(defender, damage);
   gainUltimate(projectile.owner === "player" ? player : enemy, explosionDamageDealt * (blocked ? ULT_BLOCKED_DAMAGE_GAIN_SCALE : ULT_DAMAGE_GAIN_SCALE));
@@ -5266,13 +5302,15 @@ function updateProjectiles() {
     const stepY = p.vy || 0;
     p.x += stepX;
     p.y += stepY;
+    if (p.ultimateProjectile && (p.move === "purple" || p.move === "worldSlash")) {
+      if (breakPlatformsNear(p.x, p.y, (p.radius || 36) + 28)) {
+        spawnGroundErase(p.x, Math.max(72, (p.radius || 36) + 38));
+        spawnHitSpark(p.x, p.y, p.dir || 1, p.move === "purple" ? "purple" : "slash");
+      }
+    }
     if (Number.isFinite(p.maxTravel)) p.traveled = (p.traveled || 0) + Math.hypot(stepX, stepY);
     p.life -= 1;
     const target = p.owner === "player" ? enemy : player;
-    if (p.breaksPlatforms && breakPlatformsNear(p.x, p.y, p.radius + 34)) {
-      spawnProjectileDisperse(p);
-      continue;
-    }
     if (shouldResolveProjectileHit(p, target) && !p.hit && projectileOverlapsTarget(p, target)) applyProjectileHit(p, target);
     if (p.hit) continue;
 
@@ -5345,7 +5383,7 @@ function spawnFugaExplosion(projectile, damageTarget = true) {
 }
 
 function spawnHitSpark(x, y, dir, kind) {
-  const color = kind === "block" ? "#bae6fd" : kind === "purple" ? "#d8b4fe" : kind === "worldSlash" ? "#f8fafc" : kind === "fuga" ? "#fb923c" : kind === "cleave" || kind === "slash" ? "#7f1d1d" : kind === "heavy" || kind === "red" ? "#fb7185" : kind === "blue" ? "#38bdf8" : "#fde68a";
+  const color = kind === "block" ? "#bae6fd" : kind === "purple" ? "#d8b4fe" : kind === "fuga" ? "#fb923c" : kind === "cleave" || kind === "slash" ? "#7f1d1d" : kind === "heavy" || kind === "red" ? "#fb7185" : kind === "blue" ? "#38bdf8" : "#fde68a";
   const life = kind === "purple" ? 24 : kind === "red" ? 20 : kind === "fuga" ? 18 : 14;
   hitSparks.push({ x, y, dir, kind, color, life, maxLife: life });
 }
@@ -5418,7 +5456,7 @@ function updateHitSparks() {
 
 function updatePlayer() {
   if (gameOver) return;
-  updateBluePunchCharge(player, isPressed("t", "keyt"));
+  updateBluePunchCharge(player, isPressed("s", "keys"));
   const canControl = player.stun <= 0 && !player.knockdown && !isSpecialLocked(player);
   setShielding(player, isPressed("q", "keyq"));
   setRctHealing(player, isPressed("r", "keyr"));
@@ -6496,6 +6534,80 @@ function drawFugaAimPreview(f) {
   ctx.restore();
 }
 
+
+function shouldShowUltimateAimPreview(f) {
+  if (!f || !f.ultimateAiming) return false;
+  if (gameMode === "online") return onlineRole === "p2" ? f === enemy : f === player;
+  return f === player;
+}
+
+function drawUltimateAimPreview(f) {
+  if (!shouldShowUltimateAimPreview(f)) return;
+  const kind = f.ultimateMove || (f.technique === "shrine" ? "worldSlash" : "hollowPurple");
+  const moveForAim = kind === "worldSlash" ? "slash" : "blue";
+  const aimVector = getTechniqueAimVector(f, moveForAim, f.ultimateAimPoint || f.techniqueAim || mouseAimWorld);
+  const center = getFighterCenter(f);
+  const chargeRatio = Math.max(0, Math.min(1, (f.ultimateAimTicks || 0) / ULT_AIM_HOLD_TICKS));
+  const previewRange = STAGE_W * 0.9;
+  const endX = aimVector.origin.x + aimVector.x * previewRange;
+  const endY = aimVector.origin.y + aimVector.y * previewRange;
+  const pulse = 1 + Math.sin(frame * 0.22) * 0.07;
+
+  ctx.save();
+  ctx.globalAlpha = ULT_AIM_PREVIEW_ALPHA;
+  ctx.lineCap = "round";
+  ctx.setLineDash([22, 14]);
+  ctx.strokeStyle = kind === "worldSlash" ? "rgba(255, 255, 255, 0.9)" : "rgba(216, 180, 254, 0.9)";
+  ctx.lineWidth = kind === "worldSlash" ? 8 : 6;
+  ctx.beginPath();
+  ctx.moveTo(aimVector.origin.x, aimVector.origin.y);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.translate(endX, endY);
+  ctx.rotate(aimVector.angle);
+  if (kind === "worldSlash") {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(0, 0, 48, -Math.PI * 0.7, Math.PI * 0.7);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(2, 6, 23, 0.96)";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(5, 0, 42, -Math.PI * 0.66, Math.PI * 0.66);
+    ctx.stroke();
+  } else {
+    ctx.globalCompositeOperation = "lighter";
+    const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, 84);
+    glow.addColorStop(0, "rgba(255,255,255,0.9)");
+    glow.addColorStop(0.35, "rgba(216,180,254,0.75)");
+    glow.addColorStop(1, "rgba(124,58,237,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 84, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(center.x, center.y - 10);
+  ctx.globalAlpha = 0.92;
+  ctx.strokeStyle = chargeRatio >= 1 ? "rgba(255,255,255,0.95)" : kind === "worldSlash" ? "rgba(248,250,252,0.78)" : "rgba(216,180,254,0.78)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(0, 0, 58 * pulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * chargeRatio);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(2,6,23,0.44)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 66 * pulse, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawTeleportEffects() {
   for (const effect of teleportEffects) {
     const t = effect.life / effect.maxLife;
@@ -6700,48 +6812,43 @@ function drawSukunaFugaChargeEffect(f) {
   if (!f || f.technique !== "shrine" || !f.fugaAiming) return;
   const center = getFighterCenter(f);
   const chargeRatio = Math.max(0, Math.min(1, (f.fugaChargeTicks || 0) / FUGA_CHARGE_TICKS));
-  const aimVector = getTechniqueAimVector(f, "fuga", f.techniqueAim || mouseAimWorld);
-  const angle = aimVector.angle;
-  const pull = 26 + chargeRatio * 28;
-  const bowX = center.x - aimVector.x * pull;
-  const bowY = center.y - 6 - aimVector.y * pull;
-  const arrowX = center.x + aimVector.x * (28 + chargeRatio * 18);
-  const arrowY = center.y - 6 + aimVector.y * (28 + chargeRatio * 18);
+  const pulse = 1 + Math.sin(frame * 0.28) * (0.05 + chargeRatio * 0.05);
+  const radius = 28 + chargeRatio * 34;
 
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = chargeRatio >= 1 ? "rgba(254, 240, 138, 0.95)" : "rgba(251, 146, 60, 0.72)";
-  ctx.lineWidth = 5;
-  ctx.lineCap = "round";
+  ctx.strokeStyle = chargeRatio >= 1
+    ? "rgba(254, 240, 138, 0.92)"
+    : `rgba(251, 146, 60, ${0.35 + chargeRatio * 0.36})`;
+  ctx.lineWidth = 4 + chargeRatio * 4;
+  ctx.setLineDash(chargeRatio >= 1 ? [] : [14, 10]);
+  ctx.lineDashOffset = -frame * (0.8 + chargeRatio * 0.6);
   ctx.beginPath();
-  ctx.moveTo(bowX - aimVector.y * 32, bowY + aimVector.x * 32);
-  ctx.quadraticCurveTo(center.x, center.y - 46, bowX, bowY);
-  ctx.quadraticCurveTo(center.x, center.y + 36, bowX + aimVector.y * 32, bowY - aimVector.x * 32);
+  ctx.arc(center.x, center.y - 6, radius * pulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.06, chargeRatio));
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  ctx.strokeStyle = "rgba(254, 240, 138, 0.95)";
-  ctx.lineWidth = 4;
+  const glow = ctx.createRadialGradient(center.x, center.y - 4, 2, center.x, center.y - 4, 78 * pulse);
+  glow.addColorStop(0, `rgba(254, 240, 138, ${0.18 + chargeRatio * 0.24})`);
+  glow.addColorStop(0.48, `rgba(249, 115, 22, ${0.12 + chargeRatio * 0.2})`);
+  glow.addColorStop(1, "rgba(127, 29, 29, 0)");
+  ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.moveTo(bowX, bowY);
-  ctx.lineTo(arrowX, arrowY);
-  ctx.stroke();
-
-  ctx.save();
-  ctx.translate(arrowX, arrowY);
-  ctx.rotate(angle);
-  ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
-  ctx.strokeStyle = "rgba(254, 240, 138, 0.95)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-34, -5);
-  ctx.lineTo(18, -5);
-  ctx.lineTo(34, 0);
-  ctx.lineTo(18, 5);
-  ctx.lineTo(-34, 5);
-  ctx.closePath();
+  ctx.arc(center.x, center.y - 4, 78 * pulse, 0, Math.PI * 2);
   ctx.fill();
-  ctx.stroke();
-  ctx.restore();
+
+  ctx.strokeStyle = `rgba(127, 29, 29, ${0.42 + chargeRatio * 0.38})`;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 5; i += 1) {
+    const angle = frame * 0.05 + i * Math.PI * 0.4;
+    const inner = radius * (0.45 + chargeRatio * 0.25);
+    const outer = radius * (0.95 + chargeRatio * 0.55);
+    ctx.beginPath();
+    ctx.moveTo(center.x + Math.cos(angle) * inner, center.y - 6 + Math.sin(angle) * inner);
+    ctx.lineTo(center.x + Math.cos(angle + 0.28) * outer, center.y - 6 + Math.sin(angle + 0.28) * outer);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -6826,13 +6933,10 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   ctx.save();
   ctx.globalAlpha = dodgeAlpha;
 
-  {
-    const airHeight = Math.max(0, GROUND - (f.y + f.h));
-    const shadowScale = Math.max(0.18, 1 - airHeight / 260);
-    const shadowAlpha = 0.28 * shadowScale;
-    ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+  if (!f.onPlatform) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
     ctx.beginPath();
-    ctx.ellipse(f.x + f.w / 2, GROUND + 4, f.w * 0.8 * shadowScale, 9 * shadowScale, 0, 0, Math.PI * 2);
+    ctx.ellipse(f.x + f.w / 2, GROUND + 4, f.w * 0.95, 12, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -7500,6 +7604,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   drawInfinityField(f);
   drawTeleportPreview(f);
   drawFugaAimPreview(f);
+  drawUltimateAimPreview(f);
   drawSukunaGrabThrowHud(f);
   if (shouldShowChargePreview(f)) drawTechniqueAimPreview(f);
 
@@ -8053,20 +8158,7 @@ function drawLimitlessOrb(move, radius, dir = 1) {
 function drawShrineTechniqueShape(move, radius) {
   ctx.save();
   ctx.rotate(move === "cleave" ? -0.18 : -0.1);
-  if (move === "fuga") {
-    ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
-    ctx.strokeStyle = "rgba(254, 240, 138, 0.92)";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(-radius * 1.9, -radius * 0.22);
-    ctx.lineTo(radius * 1.25, -radius * 0.22);
-    ctx.lineTo(radius * 2.05, 0);
-    ctx.lineTo(radius * 1.25, radius * 0.22);
-    ctx.lineTo(-radius * 1.9, radius * 0.22);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else if (move === "slash") {
+  if (move === "slash") {
     ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
     ctx.beginPath();
     ctx.moveTo(-radius * 1.4, -radius * 0.32);
@@ -8211,26 +8303,7 @@ function drawProjectiles() {
     ctx.translate(p.x, p.y);
     const projectileAngle = Number(p.angle);
     const hasProjectileAngle = Number.isFinite(projectileAngle);
-    if (p.move === "worldSlash") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      ctx.globalCompositeOperation = "lighter";
-      const pulse = 1 + Math.sin(frame * 0.28) * 0.06;
-      ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
-      ctx.strokeStyle = "rgba(248, 250, 252, 0.96)";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.35 * pulse, -Math.PI * 0.82, Math.PI * 0.82);
-      ctx.arc(p.radius * 0.45, 0, p.radius * 0.82 * pulse, Math.PI * 0.72, -Math.PI * 0.72, true);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.55 * pulse, -Math.PI * 0.74, Math.PI * 0.74);
-      ctx.stroke();
-    } else if (p.move === "purple") {
+    if (p.move === "purple") {
       if (hasProjectileAngle) ctx.rotate(projectileAngle);
       else ctx.scale(p.dir, 1);
       const pulse = 1 + Math.sin(frame * 0.22) * 0.05;
@@ -8273,6 +8346,30 @@ function drawProjectiles() {
       ctx.beginPath();
       ctx.moveTo(-p.radius * 3.4, 0);
       ctx.lineTo(-p.radius * 1.1, 0);
+      ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
+    } else if (p.move === "worldSlash") {
+      if (hasProjectileAngle) ctx.rotate(projectileAngle);
+      else ctx.scale(p.dir, 1);
+      const pulse = 1 + Math.sin(frame * 0.3) * 0.045;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.96;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+      ctx.lineWidth = 9;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius * 1.25 * pulse, -Math.PI * 0.72, Math.PI * 0.72);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(2, 6, 23, 0.98)";
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(4, 0, p.radius * 1.12 * pulse, -Math.PI * 0.68, Math.PI * 0.68);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.62)";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-p.radius * 1.35, 0);
+      ctx.lineTo(-p.radius * 2.6, 0);
       ctx.stroke();
       ctx.globalCompositeOperation = "source-over";
     } else if (p.move === "red") {
@@ -8670,8 +8767,8 @@ window.addEventListener("keydown", (event) => {
   if (event.target && ["INPUT", "TEXTAREA"].includes(event.target.tagName)) return;
   const key = event.key.toLowerCase();
   const code = event.code.toLowerCase();
-  const handledKeys = ["a", "d", "w", "e", "q", "r", "f", "s", "t", "c", " ", "shift", "tab", "arrowleft", "arrowright", "arrowup", "arrowdown", "p", "n", "m", "/", "escape"];
-  const handledCodes = ["keya", "keyd", "keyw", "keye", "keyq", "keyr", "keyf", "keys", "keyt", "keyc", "space", "shiftleft", "shiftright", "tab", "arrowleft", "arrowright", "arrowup", "arrowdown", "keyp", "keyn", "keym", "slash", "escape"];
+  const handledKeys = ["a", "d", "w", "e", "q", "r", "f", "s", "c", " ", "shift", "tab", "arrowleft", "arrowright", "arrowup", "arrowdown", "p", "n", "m", "/", "escape"];
+  const handledCodes = ["keya", "keyd", "keyw", "keye", "keyq", "keyr", "keyf", "keys", "keyc", "space", "shiftleft", "shiftright", "tab", "arrowleft", "arrowright", "arrowup", "arrowdown", "keyp", "keyn", "keym", "slash", "escape"];
   if (handledKeys.includes(key) || handledCodes.includes(code)) event.preventDefault();
   if (key === "escape" && !homeOpen) {
     setPaused(!paused);
@@ -8687,13 +8784,6 @@ window.addEventListener("keydown", (event) => {
   if (gameState !== "playing") return;
   keys.add(key);
   keys.add(code);
-  if ((key === "s" || code === "keys") && !event.repeat) {
-    const fighter = getActiveKeyboardSpecialFighter();
-    if (beginKeyboardSpecialAim(fighter, mouseAimWorld)) {
-      if (gameMode === "online" && onlineRole === "p2") sendOnlineInput(fighter.technique === "shrine" ? "fuga-start" : "teleport-start", mouseAimWorld);
-      return;
-    }
-  }
   if (gameMode === "online" && onlineRole === "p2") {
     if (!event.repeat && (key === "w" || code === "keyw")) noteAttackButtonPress(enemy, "light");
     if (!event.repeat && (key === "e" || code === "keye")) noteAttackButtonPress(enemy, "heavy");
@@ -8708,6 +8798,7 @@ window.addEventListener("keydown", (event) => {
     if (action === "jump") jumpFighterWithMove(enemy, (getOnlineInput().right ? 1 : 0) - (getOnlineInput().left ? 1 : 0));
     if (action === "infinity") toggleInfinity(enemy);
     if (action === "ultimate") startUltimate(enemy);
+    if (action === "ultimate-start") beginUltimateAim(enemy, enemy.techniqueAim || mouseAimWorld);
     sendOnlineInput(action);
     return;
   }
@@ -8719,7 +8810,7 @@ window.addEventListener("keydown", (event) => {
   if ((key === "f" || code === "keyf") && !event.repeat) {
     if (player.technique === "limitless") toggleInfinity(player);
   }
-  if ((key === "c" || code === "keyc") && !event.repeat) startUltimate(player);
+  if ((key === "c" || code === "keyc") && !event.repeat) beginUltimateAim(player, mouseAimWorld);
   if (key === "shift" || code === "shiftleft" || code === "shiftright") startDodge(player, getPlayerDodgeVector());
   if ((key === " " || code === "space") && !event.repeat) jumpPlayer();
   if (gameMode === "pvp") {
@@ -8740,12 +8831,11 @@ window.addEventListener("keyup", (event) => {
   const releaseAction = getTechniqueReleaseAction(key, code);
   keys.delete(event.key.toLowerCase());
   keys.delete(event.code.toLowerCase());
-  if (!homeOpen && !paused && gameState === "playing" && (key === "s" || code === "keys")) {
-    const fighter = getActiveKeyboardSpecialFighter();
-    if (releaseKeyboardSpecialAim(fighter, mouseAimWorld)) {
-      if (gameMode === "online" && onlineRole === "p2") sendOnlineInput(fighter.technique === "shrine" ? "fuga" : "teleport", mouseAimWorld);
-      return;
-    }
+  if ((key === "c" || code === "keyc") && !homeOpen && !paused && gameState === "playing") {
+    const active = gameMode === "online" && onlineRole === "p2" ? enemy : player;
+    const didRelease = releaseUltimateAim(active, active?.ultimateAimPoint || mouseAimWorld);
+    if (gameMode === "online" && onlineRole === "p2") sendOnlineInput("ultimate-release", active?.ultimateAimPoint || mouseAimWorld);
+    return;
   }
   if (gameMode === "online" && onlineRole === "p2" && releaseAction) {
     if (releaseAction === "ct1-release") releaseTechniqueInput(enemy, 1);
@@ -8765,6 +8855,36 @@ window.addEventListener("mousemove", (event) => {
   updateMouseAimFromEvent(event);
 });
 window.addEventListener("mouseup", handleTechniqueMouseUp);
+
+
+settingsButtons.forEach((button) => button.addEventListener("click", openSettingsScreen));
+if (settingsCloseButton) settingsCloseButton.addEventListener("click", closeSettingsScreen);
+if (settingsScreen) settingsScreen.addEventListener("click", (event) => { if (event.target === settingsScreen) closeSettingsScreen(); });
+if (buttonSfxVolumeSlider) {
+  buttonSfxVolume = loadSimpleVolumeSetting(BUTTON_SFX_VOLUME_STORAGE_KEY, buttonSfxVolume);
+  buttonSfxVolumeSlider.value = String(Math.round(buttonSfxVolume * 100));
+  buttonSfxVolumeSlider.addEventListener("input", () => {
+    buttonSfxVolume = Math.max(0, Math.min(1, Number(buttonSfxVolumeSlider.value) / 100 || 0));
+    buttonClickSounds.forEach((sound) => { sound.volume = buttonSfxVolume; });
+    saveSimpleVolumeSetting(BUTTON_SFX_VOLUME_STORAGE_KEY, buttonSfxVolume);
+  });
+}
+if (gameSfxVolumeSlider) {
+  gameSfxVolume = loadSimpleVolumeSetting(GAME_SFX_VOLUME_STORAGE_KEY, gameSfxVolume);
+  gameSfxVolumeSlider.value = String(Math.round(gameSfxVolume * 100));
+  gameSfxVolumeSlider.addEventListener("input", () => {
+    gameSfxVolume = Math.max(0, Math.min(1, Number(gameSfxVolumeSlider.value) / 100 || 0));
+    saveSimpleVolumeSetting(GAME_SFX_VOLUME_STORAGE_KEY, gameSfxVolume);
+  });
+}
+if (usernameInput) {
+  usernameInput.addEventListener("input", () => {
+    localPlayerName = usernameInput.value.trim().slice(0, 18) || "Player";
+    try { window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, localPlayerName); } catch (err) {}
+    if (playerNameEl) playerNameEl.textContent = localPlayerName;
+  });
+  applySavedPlayerName();
+}
 
 restartButton.addEventListener("click", resetGame);
 readyButton.addEventListener("click", handleReadyClick);
@@ -8827,49 +8947,6 @@ difficultyButtons.forEach((button) => {
     updateDifficultyButtons();
   });
 });
-
-function openSettingsScreen() {
-  if (!settingsScreen) return;
-  if (buttonSfxVolumeSlider) buttonSfxVolumeSlider.value = String(Math.round(buttonSfxVolume * 100));
-  if (gameSfxVolumeSlider) gameSfxVolumeSlider.value = String(Math.round(gameSfxVolume * 100));
-  settingsScreen.classList.remove("hidden");
-}
-
-function closeSettingsScreen() {
-  if (settingsScreen) settingsScreen.classList.add("hidden");
-}
-
-settingsButtons.forEach((button) => {
-  button.addEventListener("click", openSettingsScreen);
-});
-if (settingsCloseButton) settingsCloseButton.addEventListener("click", closeSettingsScreen);
-if (settingsScreen) {
-  settingsScreen.addEventListener("click", (event) => {
-    if (event.target === settingsScreen) closeSettingsScreen();
-  });
-}
-if (buttonSfxVolumeSlider) {
-  buttonSfxVolumeSlider.addEventListener("input", () => {
-    buttonSfxVolume = Math.max(0, Math.min(1, Number(buttonSfxVolumeSlider.value) / 100 || 0));
-    saveSfxVolume(BUTTON_SFX_VOLUME_STORAGE_KEY, buttonSfxVolume);
-  });
-}
-if (gameSfxVolumeSlider) {
-  gameSfxVolumeSlider.addEventListener("input", () => {
-    gameSfxVolume = Math.max(0, Math.min(1, Number(gameSfxVolumeSlider.value) / 100 || 0));
-    saveSfxVolume(GAME_SFX_VOLUME_STORAGE_KEY, gameSfxVolume);
-    countdownSound.volume = gameSfxVolume;
-  });
-}
-if (usernameInput) {
-  usernameInput.value = localPlayerName;
-  usernameInput.addEventListener("input", () => {
-    localPlayerName = (usernameInput.value || "Player").trim().slice(0, 18) || "Player";
-    try { window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, localPlayerName); } catch (err) {}
-    if (playerNameEl) playerNameEl.textContent = getPlayerLabel();
-  });
-}
-
 setRadioTrack(currentRadioTrackIndex, false);
 setMusicVolume(musicVolume * 100);
 musicVolumeSliders.forEach((slider) => {
