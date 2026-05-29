@@ -236,7 +236,9 @@ body {
 .ultimate-fill {
   width: 0%;
   height: 100%;
-  background: linear-gradient(90deg, #8b5cf6, #f472b6);
+  background:
+    repeating-linear-gradient(90deg, #f8fafc 0 3%, transparent 3% 5%),
+    linear-gradient(90deg, #7c3aed, #e879f9 54%, #f8fafc);
   transition: width 120ms linear;
   box-shadow: 0 0 14px rgba(232, 121, 249, 0.5);
 }
@@ -2436,7 +2438,17 @@ button.hidden {
 }
 
 
-/* Added settings + username UI */
+.settings-button {
+  background: linear-gradient(180deg, #d6bb62, #a17423) !important;
+  color: #121212 !important;
+  box-shadow: 0 4px 0 #5f4213 !important;
+}
+
+.settings-button:hover:not(:disabled) {
+  filter: brightness(1.03) saturate(0.95);
+}
+
+.settings-screen.hidden { display: none !important; }
 .settings-screen {
   position: fixed;
   inset: 0;
@@ -2446,53 +2458,16 @@ button.hidden {
   padding: 20px;
   background: rgba(3, 7, 18, 0.78);
 }
-
-.settings-screen.hidden {
-  display: none;
-}
-
 .settings-panel {
   width: min(430px, calc(100vw - 36px));
   display: grid;
-  gap: 16px;
-  padding: 24px;
+  gap: 14px;
+  padding: 22px;
   border: 3px solid #edf2ff;
   border-radius: 8px;
   background: #111725;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 22px 70px rgba(0,0,0,.55);
 }
-
-.settings-panel h2 {
-  margin: 0;
-  color: #ffe071;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-.settings-row {
-  display: grid;
-  gap: 8px;
-  font-weight: 900;
-  text-transform: uppercase;
-  color: #bfdbfe;
-}
-
-.settings-row input[type="range"] {
-  width: 100%;
-  accent-color: #facc15;
-}
-
-.settings-note {
-  margin: 0;
-  color: #cbd5e1;
-  font-size: 12px;
-  text-align: center;
-}
-
-.username-label {
-  margin-top: 4px;
-}
-
-.username-input {
-  border-color: rgba(250, 204, 21, 0.94);
-}
+.settings-panel h2 { margin: 0; color: #d6bb62; text-transform: uppercase; }
+.settings-row { display: grid; gap: 6px; font-weight: 900; color: #e5e7eb; }
+.settings-row input[type="range"] { width: 100%; accent-color: #d6bb62; }
