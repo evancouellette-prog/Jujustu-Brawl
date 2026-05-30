@@ -885,8 +885,7 @@ function startBackgroundMusic() {
 
 // KEYBIND_CAPTURE_HANDLER
 document.addEventListener("keydown", (event) => {
-  if (listeningForKeybind) return;
-  if (!listeningForKeybind) return;
+  if (typeof listeningForKeybind !== "undefined" && listeningForKeybind) return;
   event.preventDefault();
   event.stopPropagation();
   const action = listeningForKeybind;
@@ -9746,3 +9745,46 @@ function handleOnlineNameMessage(data) {
   updatePlayerNameLabels();
   return true;
 }
+
+
+// SAFE_BUTTON_AND_KEYBIND_RECOVERY_PATCH
+window.addEventListener("error", (event) => {
+  console.error("Game runtime error:", event.message, event.filename, event.lineno, event.colno);
+});
+
+function safeShowScreenById(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove("hidden");
+}
+
+function safeHideScreenById(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add("hidden");
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+
+  if (button.classList.contains("settings-button") || button.id === "openSettingsButton" || button.id === "pauseSettingsButton") {
+    safeShowScreenById("settingsScreen");
+    return;
+  }
+
+  if (button.id === "settingsCloseButton") {
+    safeHideScreenById("settingsScreen");
+    return;
+  }
+
+  if (button.id === "keybindsButton") {
+    if (typeof renderKeybindList === "function") renderKeybindList();
+    safeShowScreenById("keybindScreen");
+    return;
+  }
+
+  if (button.id === "keybindCloseButton") {
+    safeHideScreenById("keybindScreen");
+    return;
+  }
+}, true);
+
