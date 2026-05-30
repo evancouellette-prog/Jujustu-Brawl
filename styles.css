@@ -2586,3 +2586,58 @@ button.hidden {
   font-weight: 800;
   font-size: 12px;
 }
+
+
+.extra-cooldowns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.extra-cooldown {
+  position: relative;
+  min-height: 22px;
+  display: grid;
+  align-items: center;
+  padding: 3px 6px;
+  overflow: hidden;
+  border: 2px solid #020617;
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: 0 2px 0 rgba(2, 6, 23, 0.56);
+}
+
+.extra-cooldown-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #38bdf8, #a78bfa);
+  opacity: 0.82;
+  transform-origin: left center;
+  transition: width 90ms linear, background 120ms ease;
+}
+
+.fighter-panel.right .extra-cooldown-fill {
+  left: auto;
+  right: 0;
+  transform-origin: right center;
+}
+
+.extra-cooldown.cooling .extra-cooldown-fill {
+  background: linear-gradient(90deg, #f97316, #fde68a);
+}
+
+.extra-cooldown.ready .extra-cooldown-fill {
+  background: linear-gradient(90deg, #22c55e, #bbf7d0);
+}
+
+.extra-cooldown-label {
+  position: relative;
+  z-index: 1;
+  color: #020617;
+  font-family: Impact, Haettenschweiler, "Arial Black", Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.72);
+  white-space: nowrap;
+}
