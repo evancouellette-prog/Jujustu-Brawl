@@ -7,6 +7,8 @@ const playerCeEl = document.getElementById("playerCe");
 const enemyCeEl = document.getElementById("enemyCe");
 const playerUltimateEl = document.getElementById("playerUltimate");
 const enemyUltimateEl = document.getElementById("enemyUltimate");
+const playerExtraCooldownsEl = document.getElementById("playerExtraCooldowns");
+const enemyExtraCooldownsEl = document.getElementById("enemyExtraCooldowns");
 const ctHud = {
   player: [
     {
@@ -383,6 +385,16 @@ function resetKeyBindings() {
 if (keybindsButton) keybindsButton.addEventListener("click", openKeybindScreen);
 if (keybindCloseButton) keybindCloseButton.addEventListener("click", closeKeybindScreen);
 if (keybindResetButton) keybindResetButton.addEventListener("click", resetKeyBindings);
+
+
+// NAME_TAG_INIT_PATCH
+if (usernameInput) {
+  loadLocalPlayerName();
+  usernameInput.addEventListener("input", saveLocalPlayerName);
+  usernameInput.addEventListener("change", saveLocalPlayerName);
+} else {
+  loadLocalPlayerName();
+}
 
 function getAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1051,7 +1063,7 @@ const RCT_HEAL_BAR_RATIO_PER_SECOND = { limitless: 0.24, shrine: 0.12 };
 const RCT_MIN_CE_RATIO = 0.15;
 const RCT_MOVE_MULTIPLIER = 0.4;
 const RCT_CE_COST_RATIO_PER_SECOND = { limitless: 0.06, shrine: 0.15 };
-const RCT_COOLDOWN_TICKS = { limitless: 360, shrine: 420 };
+const RCT_COOLDOWN_TICKS = { limitless: 3 * 60, shrine: 3 * 60 };
 const COMBO_RESET_TICKS = 46;
 const COMBO_CHAIN_WINDOW = 18;
 const PUNCH_COOLDOWN_TICKS = 32;
@@ -1172,6 +1184,7 @@ let player2Ready = false;
 let readyCountdownValue = 0;
 let lastRoundWinner = null;
 let lastOnlineReadySent = 0;
+let lastOnlineNameSent = 0;
 const mouseTechniqueHeld = { ct1: false, ct2: false, teleport: false, fuga: false };
 
 
@@ -1235,6 +1248,75 @@ function updatePlayerNameLabels() {
   }
   if (playerNameEl) playerNameEl.textContent = mine;
   if (enemyNameEl) enemyNameEl.textContent = getOpponentDisplayName();
+}
+
+function sendOnlineName() {
+  if (!onlineSocket || !onlineConnected || !onlineRole) return;
+  try {
+    onlineSocket.send(JSON.stringify({
+      type: "name",
+      role: onlineRole,
+      name: getLocalPlayerName()
+    }));
+  } catch (err) {}
+}
+
+
+// NAME_TAG_SYSTEM_PATCH
+function sanitizePlayerName(name, fallback = "Player") {
+  const clean = String(name || "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 18);
+  return clean || fallback;
+}
+
+function getLocalPlayerName() {
+  if (usernameInput) {
+    localPlayerName = sanitizePlayerName(usernameInput.value, "Player");
+  }
+  return sanitizePlayerName(localPlayerName, "Player");
+}
+
+function loadLocalPlayerName() {
+  try {
+    localPlayerName = sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY), "Player");
+  } catch (err) {
+    localPlayerName = "Player";
+  }
+  if (usernameInput) usernameInput.value = localPlayerName;
+  updatePlayerNameLabels();
+}
+
+function saveLocalPlayerName() {
+  localPlayerName = getLocalPlayerName();
+  try {
+    window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, localPlayerName);
+  } catch (err) {}
+  updatePlayerNameLabels();
+  sendOnlineName();
+}
+
+function getModeOpponentName() {
+  if (gameMode === "practice") return "Practice Dummy";
+  if (gameMode === "cpu") return "CPU";
+  if (gameMode === "online") {
+    if (onlineRole === "p1") return sanitizePlayerName(onlinePlayerNames.p2, "Player 2");
+    if (onlineRole === "p2") return sanitizePlayerName(onlinePlayerNames.p1, "Player 1");
+  }
+  return "Player 2";
+}
+
+function updatePlayerNameLabels() {
+  const mine = getLocalPlayerName();
+  if (gameMode === "online" && onlineRole === "p2") {
+    if (playerNameEl) playerNameEl.textContent = sanitizePlayerName(onlinePlayerNames.p1, "Player 1");
+    if (enemyNameEl) enemyNameEl.textContent = mine;
+    return;
+  }
+  if (playerNameEl) playerNameEl.textContent = mine;
+  if (enemyNameEl) enemyNameEl.textContent = getModeOpponentName();
 }
 
 function sendOnlineName() {
@@ -2214,7 +2296,10 @@ function setPaused(value, broadcast = true) {
 function startOnlineGame(role) {
   onlineRole = role;
   onlineConnected = true;
-  homeOpen = false;
+  
+  sendOnlineName(); // ONLINE_NAME_SEND_PATCH
+  updatePlayerNameLabels();
+homeOpen = false;
   paused = false;
   gameMode = "online";
   setGameState("lobby", "online role assigned");
@@ -2857,7 +2942,58 @@ function renderSegmentedHealth(el, f) {
   });
 }
 
+
+function getCooldownRatio(current, max) {
+  const c = Math.max(0, Number(current) || 0);
+  const m = Math.max(1, Number(max) || 1);
+  return Math.max(0, Math.min(1, c / m));
+}
+
+function getExtraCooldownItems(f) {
+  if (!f) return [];
+  const rctMax = RCT_COOLDOWN_TICKS[f.technique] || 180;
+  const bluePunchMax = GOJO_BLUE_PUNCH_COOLDOWN_TICKS || 600;
+  const finisherMax = GOJO_LIGHT_FINISHER_COOLDOWN_TICKS || GOJO_PUSH_PULL_FINISHER_COOLDOWN_TICKS || 300;
+  const fugaMax = FUGA_COOLDOWN_TICKS || 600;
+  const teleportMax = GOJO_TELEPORT_COOLDOWN_TICKS || 480;
+
+  const items = [
+    { name: "RCT", current: f.rctCooldown || 0, max: rctMax }
+  ];
+
+  if (f.technique === "limitless") {
+    items.push({ name: "AMP", current: f.bluePunchCooldown || 0, max: bluePunchMax });
+    items.push({ name: "FIN", current: f.gojoLightFinisherCooldown || f.pushPullFinisherCooldown || 0, max: finisherMax });
+    items.push({ name: "TP", current: f.teleportCooldown || 0, max: teleportMax });
+  } else if (f.technique === "shrine") {
+    items.push({ name: "FUGA", current: f.fugaCooldown || 0, max: fugaMax });
+  }
+
+  return items;
+}
+
+function updateExtraCooldownHud(container, f) {
+  if (!container) return;
+  const items = getExtraCooldownItems(f);
+  container.innerHTML = "";
+  items.forEach((item) => {
+    const ratio = getCooldownRatio(item.current, item.max);
+    const ready = ratio <= 0;
+    const row = document.createElement("div");
+    row.className = `extra-cooldown ${ready ? "ready" : "cooling"}`;
+    const fill = document.createElement("div");
+    fill.className = "extra-cooldown-fill";
+    fill.style.width = `${ready ? 100 : ratio * 100}%`;
+    const label = document.createElement("span");
+    label.className = "extra-cooldown-label";
+    label.textContent = ready ? `${item.name}: READY` : `${item.name}: ${Math.ceil(item.current / 60)}s`;
+    row.append(fill, label);
+    container.appendChild(row);
+  });
+}
+
 function updateHud() {
+  updatePlayerNameLabels();
   playerNameEl.textContent = getPlayerLabel();
   enemyNameEl.textContent = getEnemyLabel();
   enemyNameEl.classList.toggle("player-two-name", gameMode !== "cpu");
@@ -2879,6 +3015,9 @@ function updateHud() {
   enemyStarsEl.textContent = "★".repeat(enemyRounds) + "☆".repeat(Math.max(0, WINS_TO_MATCH - enemyRounds));
   updatePracticeDamageMeter();
   updatePracticeSettingsButtonVisibility();
+
+  updateExtraCooldownHud(playerExtraCooldownsEl, player);
+  updateExtraCooldownHud(enemyExtraCooldownsEl, enemy);
 }
 
 function finishRound(winner) {
@@ -3881,10 +4020,17 @@ function canStartRct(f) {
   return f.ce >= f.maxCe * RCT_MIN_CE_RATIO;
 }
 
-function cancelRct(f, startCooldown = true) {
-  if (!f || !f.rctHealing) return;
-  f.rctHealing = false;
-  if (startCooldown) f.rctCooldown = Math.max(f.rctCooldown || 0, getRctCooldownTicks(f));
+function cancelRct(f, forceReset = false) {
+  // RCT is no longer cancelled by normal attacks or damage.
+  // Only true forced resets, such as round/domain cleanup, can shut it off.
+  if (!forceReset) return;
+  if (!f) return;
+  f.rctActive = false;
+  
+  
+  f.rctCooldown = Math.max(f.rctCooldown || 0, RCT_COOLDOWN_TICKS[f.technique] || 180);if (!forceReset) f.rctCooldown = Math.max(f.rctCooldown || 0, RCT_COOLDOWN_TICKS[f.technique] || 180); // RCT_COOLDOWN_ON_STOP_PATCH
+f.rctHolding = false;
+  f.rctTicks = 0;
 }
 
 function setRctHealing(f, wantsRct) {
@@ -4244,7 +4390,7 @@ function applyWorldSlashHit(attacker, defender, slash) {
   const damage = getTakenDamage(defender, baseDamage);
   if (blocked) damageShield(defender, WORLD_SLASH_DAMAGE * 1.35);
   applyFighterDamage(defender, damage);
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   defender.hurt = blocked ? 8 : 24;
   defender.stun = blocked ? 14 : 42;
   if (!blocked) {
@@ -4557,7 +4703,7 @@ function applyDomainCleave(ownerFighter, target) {
   const damage = getTakenDamage(target, Math.ceil(rawDamage * getOutgoingDamageMultiplier(ownerFighter)));
   if (blocked) damageShield(target, 38);
   applyFighterDamage(target, damage);
-  cancelRct(target, true);
+  cancelRct(target, false);
   target.hurt = Math.max(target.hurt, blocked ? 6 : 16);
   target.stun = Math.max(target.stun, blocked ? 8 : 18);
   if (!blocked) {
@@ -4681,7 +4827,9 @@ function canChargeBluePunch(f) {
 
 function activateBluePunch(f) {
   f.bluePunchActiveTicks = GOJO_BLUE_PUNCH_ACTIVE_TICKS;
-  f.bluePunchHoldTicks = 0;
+  
+  f.bluePunchCooldown = Math.max(f.bluePunchCooldown || 0, GOJO_BLUE_PUNCH_COOLDOWN_TICKS);
+f.bluePunchHoldTicks = 0;
   f.bluePunchChases = 0;
   f.bluePunchFlash = 18;
   const center = getFighterCenter(f);
@@ -4829,7 +4977,7 @@ function startSukunaBarrage(attacker, defender, damage, knockback) {
   defender.stun = Math.max(defender.stun, SUKUNA_BARRAGE_DURATION_TICKS + 8);
   defender.grounded = defender.grounded || defender.y + defender.h >= GROUND - 4;
   defender.barrageLockY = defender.y;
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   resetCombo(defender);
   lockBarrageTarget(attacker, defender);
 
@@ -5003,7 +5151,7 @@ function startSukunaGrabThrow(attacker, defender, damage, knockback) {
 
   const damageDealt = applyFighterDamage(defender, damage);
   gainUltimate(attacker, damageDealt * ULT_DAMAGE_GAIN_SCALE);
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   defender.attacking = null;
   defender.attackFrame = 0;
   defender.hasHit = false;
@@ -5133,7 +5281,7 @@ function applyBackThrowHit(attacker, defender) {
   const damage = getTakenDamage(defender, Math.ceil(attack.damage * getOutgoingDamageMultiplier(attacker)));
   const throwDamageDealt = applyFighterDamage(defender, damage);
   gainUltimate(attacker, throwDamageDealt * ULT_DAMAGE_GAIN_SCALE);
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   resetCombo(attacker);
   resetCombo(defender);
 
@@ -5242,7 +5390,7 @@ function applyHit(attacker, defender) {
   }
   const meleeDamageDealt = applyFighterDamage(defender, damage);
   gainUltimate(attacker, meleeDamageDealt * (blocked ? ULT_BLOCKED_DAMAGE_GAIN_SCALE : ULT_DAMAGE_GAIN_SCALE));
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   defender.hurt = blocked ? 6 : 14;
   defender.stun = getComboHitstun(attacker, attackType, blocked);
   let comboKnockbackScale = blocked ? 1 : 1 + comboHitsBefore * 0.14;
@@ -5433,7 +5581,7 @@ function applyProjectileHit(projectile, defender) {
   if (!projectile.ultimateProjectile && projectile.move !== "purple" && projectile.move !== "worldSlash") {
     gainUltimate(ownerFighter, projectileDamageDealt * (blocked ? ULT_BLOCKED_DAMAGE_GAIN_SCALE : ULT_DAMAGE_GAIN_SCALE));
   }
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   defender.hurt = blocked ? 6 : 14;
   defender.stun = projectile.move === "purple" ? 30 : projectile.move === "worldSlash" ? 30 : projectile.move === "blue" ? 10 : projectile.move === "cleave" ? 20 : projectile.move === "fuga" ? 24 : 14;
   if (!blocked) {
@@ -5499,7 +5647,7 @@ function applyFugaExplosionDamage(projectile, defender) {
   if (blocked) damageShield(defender, projectile.damage * 0.8);
   const explosionDamageDealt = applyFighterDamage(defender, damage);
   gainUltimate(projectile.owner === "player" ? player : enemy, explosionDamageDealt * (blocked ? ULT_BLOCKED_DAMAGE_GAIN_SCALE : ULT_DAMAGE_GAIN_SCALE));
-  cancelRct(defender, true);
+  cancelRct(defender, false);
   defender.hurt = blocked ? 6 : 18;
   defender.stun = blocked ? 8 : 24;
 
@@ -6322,6 +6470,8 @@ function updateEnemyAi() {
 }
 
 function updateFighter(f, opponent) {
+  f.rctCooldown = Math.max(0, (f.rctCooldown || 0) - 1);
+
   if (!f.ko) f.dir = f.x + f.w / 2 < opponent.x + opponent.w / 2 ? 1 : -1;
   updateBluePunchTimers(f);
   if (f.gojoPushPullCooldown > 0) f.gojoPushPullCooldown -= 1;
@@ -9520,3 +9670,79 @@ function drawHitStopAimPreviewOverlay() {
   });
 }
 
+
+
+// RELIABLE_SETTINGS_AND_KEYBINDS_FIX
+function forceOpenSettingsScreen() {
+  const screen = document.getElementById("settingsScreen");
+  if (!screen) return;
+  screen.classList.remove("hidden");
+}
+
+function forceCloseSettingsScreen() {
+  const screen = document.getElementById("settingsScreen");
+  if (!screen) return;
+  screen.classList.add("hidden");
+}
+
+function forceOpenKeybindScreen() {
+  const screen = document.getElementById("keybindScreen");
+  if (!screen) return;
+  listeningForKeybind = null;
+  renderKeybindList();
+  screen.classList.remove("hidden");
+}
+
+function forceCloseKeybindScreen() {
+  const screen = document.getElementById("keybindScreen");
+  if (!screen) return;
+  listeningForKeybind = null;
+  screen.classList.add("hidden");
+  renderKeybindList();
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+
+  if (button.classList.contains("settings-button") || button.id === "openSettingsButton" || button.id === "pauseSettingsButton") {
+    event.preventDefault();
+    forceOpenSettingsScreen();
+    return;
+  }
+
+  if (button.id === "settingsCloseButton") {
+    event.preventDefault();
+    forceCloseSettingsScreen();
+    return;
+  }
+
+  if (button.id === "keybindsButton") {
+    event.preventDefault();
+    forceOpenKeybindScreen();
+    return;
+  }
+
+  if (button.id === "keybindCloseButton") {
+    event.preventDefault();
+    forceCloseKeybindScreen();
+    return;
+  }
+
+  if (button.id === "keybindResetButton") {
+    event.preventDefault();
+    resetKeyBindings();
+    return;
+  }
+}, true);
+
+
+
+// ONLINE_NAME_FALLBACK_HANDLER
+function handleOnlineNameMessage(data) {
+  if (!data || data.type !== "name") return false;
+  const role = data.role === "p2" ? "p2" : "p1";
+  onlinePlayerNames[role] = sanitizePlayerName(data.name, role === "p1" ? "Player 1" : "Player 2");
+  updatePlayerNameLabels();
+  return true;
+}
