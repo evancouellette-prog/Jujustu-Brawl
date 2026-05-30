@@ -3107,13 +3107,11 @@ function getCooldownRatio(current, max) {
 
 function getExtraCooldownItems(f) {
   if (!f) return [];
-
-  // Practice dummy should only show HP, not cooldown rows.
-  if (gameMode === "practice" && f === enemy) return [];
-
   const rctMax = RCT_COOLDOWN_TICKS[f.technique] || 180;
   const bluePunchMax = GOJO_BLUE_PUNCH_COOLDOWN_TICKS || 600;
   const finisherMax = GOJO_LIGHT_FINISHER_COOLDOWN_TICKS || GOJO_PUSH_PULL_FINISHER_COOLDOWN_TICKS || 300;
+  const fugaMax = FUGA_COOLDOWN_TICKS || 600;
+  const teleportMax = GOJO_TELEPORT_COOLDOWN_TICKS || 480;
 
   const items = [
     { name: "RCT", current: f.rctCooldown || 0, max: rctMax }
@@ -3121,7 +3119,10 @@ function getExtraCooldownItems(f) {
 
   if (f.technique === "limitless") {
     items.push({ name: "AMP", current: f.bluePunchCooldown || 0, max: bluePunchMax });
-    items.push({ name: "STUN COMBO", current: f.gojoLightFinisherCooldown || f.pushPullFinisherCooldown || 0, max: finisherMax });
+    items.push({ name: "FIN", current: f.gojoLightFinisherCooldown || f.pushPullFinisherCooldown || 0, max: finisherMax });
+    items.push({ name: "TP", current: f.teleportCooldown || 0, max: teleportMax });
+  } else if (f.technique === "shrine") {
+    items.push({ name: "FUGA", current: f.fugaCooldown || 0, max: fugaMax });
   }
 
   return items;
@@ -3131,110 +3132,34 @@ function updateExtraCooldownHud(container, f) {
   if (!container) return;
   const items = getExtraCooldownItems(f);
   container.innerHTML = "";
-
-  if (!items.length) {
-    container.classList.add("hidden");
-    return;
-  }
-
-  container.classList.remove("hidden");
-
   items.forEach((item) => {
     const ratio = getCooldownRatio(item.current, item.max);
     const ready = ratio <= 0;
     const row = document.createElement("div");
-    row.className = `extra-cooldown ct-slot ${ready ? "ready" : "cooling"}`;
-
-    const meter = document.createElement("div");
-    meter.className = "ct-meter";
-
+    row.className = `extra-cooldown ${ready ? "ready" : "cooling"}`;
     const fill = document.createElement("div");
-    fill.className = "extra-cooldown-fill ct-fill";
-    fill.style.width = `${ready ? 100 : Math.max(5, ratio * 100)}%`;
-
+    fill.className = "extra-cooldown-fill";
+    fill.style.width = `${ready ? 100 : ratio * 100}%`;
     const label = document.createElement("span");
-    label.className = "extra-cooldown-label ct-label";
-    label.textContent = item.name;
-
-    const status = document.createElement("span");
-    status.className = "extra-cooldown-status ct-status";
-    status.textContent = ready ? "READY" : `${Math.ceil(item.current / 60)}s`;
-
-    meter.appendChild(fill);
-    row.append(label, meter, status);
+    label.className = "extra-cooldown-label";
+    label.textContent = ready ? `${item.name}: READY` : `${item.name}: ${Math.ceil(item.current / 60)}s`;
+    row.append(fill, label);
     container.appendChild(row);
   });
 }
 
 
-// CLEAN_RCT_FIX_PATCH
-function getCurrentHealthBarBounds(f) {
-  const bars = Math.max(1, f.healthBars || 1);
-  const barSize = f.maxHealth / bars;
-  const currentHealth = Math.max(0.01, f.health || 0.01);
-  const currentBarIndex = Math.max(0, Math.ceil(currentHealth / barSize) - 1);
-  const floor = currentBarIndex * barSize;
-  const ceiling = Math.min(f.maxHealth, (currentBarIndex + 1) * barSize);
-  return { floor, ceiling, barSize, currentBarIndex };
+function setHudElementHidden(el, hidden) {
+  if (el) el.classList.toggle("hidden", Boolean(hidden));
 }
 
-function canUseRctClean(f) {
-  if (!f || f.ko || f.dead) return false;
-  if ((f.rctCooldown || 0) > 0) return false;
-  if ((f.ce || 0) < f.maxCe * RCT_MIN_CE_RATIO) return false;
-  const bounds = getCurrentHealthBarBounds(f);
-  return f.health < bounds.ceiling - 0.5;
-}
-
-function stopRctClean(f, startCooldown = true) {
-  if (!f) return;
-  const wasActive = Boolean(f.rctActive || f.rctHolding);
-  f.rctActive = false;
-  f.rctHolding = false;
-  f.rctTicks = 0;
-  if (startCooldown && wasActive) {
-    f.rctCooldown = Math.max(f.rctCooldown || 0, RCT_COOLDOWN_TICKS[f.technique] || 180);
-  }
-}
-
-function updateRctClean(f, wantsRct) {
-  if (!f) return;
-
-  f.rctCooldown = Math.max(0, (f.rctCooldown || 0) - 1);
-
-  const wants = Boolean(wantsRct);
-
-  if (!wants) {
-    stopRctClean(f, true);
-    return;
-  }
-
-  if (!canUseRctClean(f)) {
-    stopRctClean(f, false);
-    return;
-  }
-
-  f.rctActive = true;
-  f.rctHolding = true;
-  f.rctTicks = (f.rctTicks || 0) + 1;
-
-  const bounds = getCurrentHealthBarBounds(f);
-  const healPerTick = (f.maxHealth / Math.max(1, f.healthBars || 1)) * (RCT_HEAL_BAR_RATIO_PER_SECOND[f.technique] || 0.14) / 60;
-  const ceCostPerTick = f.maxCe * (RCT_CE_COST_RATIO_PER_SECOND[f.technique] || 0.08) / 60;
-
-  f.health = Math.min(bounds.ceiling, f.health + healPerTick);
-  f.delayedHealth = Math.max(f.delayedHealth || f.health, f.health);
-  f.ce = Math.max(0, f.ce - ceCostPerTick);
-
-  if (f.health >= bounds.ceiling - 0.25 || f.ce <= 0) {
-    stopRctClean(f, true);
-  }
-}
-
-function cancelRct(f, forceReset = false) {
-  // RCT is not cancelled by normal attacks anymore.
-  if (!forceReset || !f) return;
-  stopRctClean(f, false);
+function updatePracticeDummyHudVisibility() {
+  const hideDummyMeters = gameMode === "practice";
+  setHudElementHidden(enemyCeEl ? enemyCeEl.closest(".ce-frame") : null, hideDummyMeters);
+  setHudElementHidden(enemyUltimateEl ? enemyUltimateEl.closest(".ultimate-frame") : null, hideDummyMeters);
+  const enemyCtGrid = ctHud?.enemy?.[0]?.slot ? ctHud.enemy[0].slot.closest(".ct-cooldowns") : null;
+  setHudElementHidden(enemyCtGrid, hideDummyMeters);
+  setHudElementHidden(enemyExtraCooldownsEl, hideDummyMeters);
 }
 
 function updateHud() {
@@ -3263,6 +3188,7 @@ function updateHud() {
 
   updateExtraCooldownHud(playerExtraCooldownsEl, player);
   updateExtraCooldownHud(enemyExtraCooldownsEl, enemy);
+  updatePracticeDummyHudVisibility();
 }
 
 function finishRound(winner) {
@@ -4260,16 +4186,29 @@ function getRctHealPerTick(f) {
 }
 
 function canStartRct(f) {
-  if (!f || gameOver || paused || isSpecialLocked(f) || f.ko || f.knockdown || f.stun > 0 || f.dodging > 0 || f.attacking || f.chargingTechnique) return false;
+  if (!f || gameOver || paused || isSpecialLocked(f) || f.ko || f.knockdown || f.dodging > 0) return false;
   if (f.health >= getCurrentHealthBarCeiling(f) || f.rctCooldown > 0) return false;
   return f.ce >= f.maxCe * RCT_MIN_CE_RATIO;
 }
 
+function cancelRct(f, forceReset = false) {
+  if (!f) return;
+  const wasHealing = Boolean(f.rctHealing || f.rctActive || f.rctHolding);
+  f.rctHealing = false;
+  f.rctActive = false;
+  f.rctHolding = false;
+  f.rctTicks = 0;
 
+  // Normal release/full-bar/empty-CE starts the 3 second cooldown.
+  // forceReset is for round cleanup and does not need to punish with cooldown.
+  if (!forceReset && wasHealing) {
+    f.rctCooldown = Math.max(f.rctCooldown || 0, RCT_COOLDOWN_TICKS[f.technique] || 180);
+  }
+}
 
 function setRctHealing(f, wantsRct) {
   if (!wantsRct) {
-    cancelRct(f, false);
+    cancelRct(f, true);
     return;
   }
   if (f.rctHealing || canStartRct(f)) {
@@ -4286,10 +4225,11 @@ function getCurrentHealthBarCeiling(f) {
 }
 
 function updateRct(f) {
-  if (f.rctCooldown > 0) f.rctCooldown -= 1;
+  // rctCooldown is decremented in updateFighter, not here.
   if (!f.rctHealing) return;
+
   const currentBarCeiling = getCurrentHealthBarCeiling(f);
-  if (f.ko || f.knockdown || f.stun > 0 || f.dodging > 0 || f.attacking || f.chargingTechnique || f.health >= currentBarCeiling || f.ce <= 0) {
+  if (f.ko || f.health >= currentBarCeiling || f.ce <= 0) {
     cancelRct(f, false);
     return;
   }
@@ -4299,6 +4239,7 @@ function updateRct(f) {
   f.ce = Math.max(0, f.ce - ceCost);
   f.health = Math.min(currentBarCeiling, f.health + getRctHealPerTick(f) * affordable);
   f.delayedHealth = Math.max(f.delayedHealth || f.health, f.health);
+
   if (f.ce <= 0 || f.health >= currentBarCeiling) cancelRct(f, false);
 }
 
@@ -7604,124 +7545,6 @@ function drawSukunaGrabThrowHud(f) {
   ctx.restore();
 }
 
-
-// CLEAN_SUKUNA_VISUAL_PATCH
-function drawSukunaModelCleanup(f) {
-  if (!f || f.technique !== "shrine") return;
-
-  ctx.save();
-  const facing = f.dir || 1;
-  const centerX = f.x + f.w / 2;
-  const baseY = f.y;
-  ctx.translate(centerX, baseY);
-  ctx.scale(facing, 1);
-
-  const skin = "#e3ad99";
-  const tattoo = "#16050b";
-  const pantsLine = "rgba(245, 245, 245, 0.26)";
-
-  // Cover old extra eye/details with a clean face patch.
-  ctx.fillStyle = skin;
-  if (ctx.roundRect) {
-    ctx.beginPath();
-    ctx.roundRect(-16, 4, 32, 30, 9);
-    ctx.fill();
-  } else {
-    ctx.fillRect(-16, 4, 32, 30);
-  }
-
-  // Main eyes only.
-  ctx.strokeStyle = tattoo;
-  ctx.lineWidth = 2.1;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-11, 16);
-  ctx.lineTo(-4, 14);
-  ctx.moveTo(11, 16);
-  ctx.lineTo(4, 14);
-  ctx.stroke();
-
-  // Face tattoos more like the show.
-  ctx.lineWidth = 2.4;
-  ctx.beginPath();
-  ctx.moveTo(0, 7);
-  ctx.lineTo(0, 13);
-
-  ctx.moveTo(-7, 9);
-  ctx.quadraticCurveTo(-12, 10, -14, 14);
-  ctx.moveTo(7, 9);
-  ctx.quadraticCurveTo(12, 10, 14, 14);
-
-  ctx.moveTo(-14, 22);
-  ctx.quadraticCurveTo(-8, 19, -3, 21);
-  ctx.moveTo(14, 22);
-  ctx.quadraticCurveTo(8, 19, 3, 21);
-
-  ctx.moveTo(-4, 28);
-  ctx.lineTo(-1, 32);
-  ctx.moveTo(4, 28);
-  ctx.lineTo(1, 32);
-  ctx.stroke();
-
-  // Torso/arm tattoo accents.
-  ctx.lineWidth = 2.7;
-  ctx.beginPath();
-  ctx.moveTo(-18, 47);
-  ctx.quadraticCurveTo(-7, 53, 0, 48);
-  ctx.quadraticCurveTo(7, 53, 18, 47);
-  ctx.moveTo(-19, 62);
-  ctx.lineTo(-7, 69);
-  ctx.moveTo(19, 62);
-  ctx.lineTo(7, 69);
-  ctx.moveTo(-24, 52);
-  ctx.lineTo(-15, 57);
-  ctx.moveTo(24, 52);
-  ctx.lineTo(15, 57);
-  ctx.stroke();
-
-  // Paint over shoes with bare feet/ankles.
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(-13, 93, 14, 6, 0.04, 0, Math.PI * 2);
-  ctx.ellipse(13, 93, 14, 6, -0.04, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = tattoo;
-  ctx.lineWidth = 1.3;
-  ctx.beginPath();
-  ctx.moveTo(-24, 93);
-  ctx.quadraticCurveTo(-14, 97, -2, 93);
-  ctx.moveTo(2, 93);
-  ctx.quadraticCurveTo(14, 97, 24, 93);
-  ctx.stroke();
-
-  // Add more pants detail.
-  ctx.strokeStyle = pantsLine;
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-22, 66);
-  ctx.lineTo(22, 66);
-
-  ctx.moveTo(-18, 73);
-  ctx.quadraticCurveTo(-10, 79, -15, 90);
-  ctx.moveTo(-6, 69);
-  ctx.quadraticCurveTo(-2, 80, -7, 91);
-
-  ctx.moveTo(18, 73);
-  ctx.quadraticCurveTo(10, 79, 15, 90);
-  ctx.moveTo(6, 69);
-  ctx.quadraticCurveTo(2, 80, 7, 91);
-
-  ctx.moveTo(-19, 82);
-  ctx.lineTo(-5, 84);
-  ctx.moveTo(19, 82);
-  ctx.lineTo(5, 84);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
 function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   const flash = f.hurt > 0 && Math.floor(frame / 3) % 2 === 0;
   const dodgeAlpha = f.dodging > 0 ? 0.48 : 1;
@@ -9804,11 +9627,7 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.code.toLowerCase());
   keys.delete(event.key);
   keys.delete(event.code);
-  
-  if (isEventForAction("rct", event.key, event.code)) {
-    stopRctClean(player, true); // RCT_KEYUP_FORCE_STOP_PATCH
-  }
-if (isEventForAction("specialAim", key, code) && !homeOpen && !paused && gameState === "playing") {
+  if (isEventForAction("specialAim", key, code) && !homeOpen && !paused && gameState === "playing") {
     const active = gameMode === "online" && onlineRole === "p2" ? enemy : player;
     if (active?.fugaAiming) {
       startFuga(active, active?.techniqueAim || mouseAimWorld);
