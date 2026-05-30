@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jujutsu Brawl</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="topbar" aria-label="match status">
+      <div class="fighter-panel">
+        <span class="fighter-name"><span id="playerName" class="fighter-name-text player-one-name">Player 1</span><span id="playerStars" class="stars">☆☆</span></span>
+        <div id="playerHealth" class="health-frame segmented-health player" aria-label="player 1 health"></div>
+        <div class="ce-frame"><div id="playerCe" class="ce-fill"></div></div>
+        <div class="ultimate-frame" aria-label="player 1 ultimate meter"><div id="playerUltimate" class="ultimate-fill"></div></div>
+        <div class="ct-cooldowns" aria-label="player 1 cursed technique cooldowns">
+          <div class="ct-slot" id="playerCt1Slot">
+            <span id="playerCt1Label" class="ct-label">CT1</span>
+            <div class="ct-meter"><div id="playerCt1Fill" class="ct-fill"></div></div>
+            <span id="playerCt1Status" class="ct-status">READY</span>
+          </div>
+          <div class="ct-slot" id="playerCt2Slot">
+            <span id="playerCt2Label" class="ct-label">CT2</span>
+            <div class="ct-meter"><div id="playerCt2Fill" class="ct-fill"></div></div>
+            <span id="playerCt2Status" class="ct-status">READY</span>
+          </div>
+          <div class="ct-slot" id="playerCt3Slot">
+            <span id="playerCt3Label" class="ct-label">CT3</span>
+            <div class="ct-meter"><div id="playerCt3Fill" class="ct-fill"></div></div>
+            <span id="playerCt3Status" class="ct-status">READY</span>
+          </div>
+        </div>
+        <div id="playerExtraCooldowns" class="extra-cooldowns" aria-label="player extra cooldowns"></div>
+      </div>
+      <div class="round-panel">
+        <span id="roundInfo" class="round-info">Round 1</span>
+        <span id="scoreInfo" class="score-info">First to 2</span>
+        <button id="pauseButton" type="button">Pause</button>
+        <button id="homeButton" type="button">Home</button>
+        <button id="restartButton" type="button">Restart</button>
+      </div>
+      <div class="fighter-panel right">
+        <span class="fighter-name"><span id="enemyStars" class="stars">☆☆</span><span id="enemyName" class="fighter-name-text player-two-name">Player 2</span></span>
+        <div id="enemyHealth" class="health-frame segmented-health enemy" aria-label="player 2 health"></div>
+        <div class="ce-frame"><div id="enemyCe" class="ce-fill"></div></div>
+        <div class="ultimate-frame" aria-label="player 2 ultimate meter"><div id="enemyUltimate" class="ultimate-fill"></div></div>
+        <div class="ct-cooldowns" aria-label="player 2 cursed technique cooldowns">
+          <div class="ct-slot" id="enemyCt1Slot">
+            <span id="enemyCt1Label" class="ct-label">CT1</span>
+            <div class="ct-meter"><div id="enemyCt1Fill" class="ct-fill"></div></div>
+            <span id="enemyCt1Status" class="ct-status">READY</span>
+          </div>
+          <div class="ct-slot" id="enemyCt2Slot">
+            <span id="enemyCt2Label" class="ct-label">CT2</span>
+            <div class="ct-meter"><div id="enemyCt2Fill" class="ct-fill"></div></div>
+            <span id="enemyCt2Status" class="ct-status">READY</span>
+          </div>
+          <div class="ct-slot" id="enemyCt3Slot">
+            <span id="enemyCt3Label" class="ct-label">CT3</span>
+            <div class="ct-meter"><div id="enemyCt3Fill" class="ct-fill"></div></div>
+            <span id="enemyCt3Status" class="ct-status">READY</span>
+          </div>
+        </div>
+        <div id="enemyExtraCooldowns" class="extra-cooldowns" aria-label="enemy extra cooldowns"></div>
+      </div>
+    </section>
+
+    <canvas id="game" width="960" height="540" aria-label="2D fighting game"></canvas>
+
+    <section id="controlsPanel" class="controls" aria-label="game controls">
+      <div class="controls-card">
+        <h2>Controls</h2><p class="control-note">Customizable in Settings → Key Bindings.</p>
+        <div class="controls-grid">
+          <p><strong>Move</strong><span><kbd>A</kbd><kbd>D</kbd> walk</span><span><kbd>Space</kbd> jump / double jump</span></p>
+          <p><strong>Attack</strong><span><kbd>W</kbd> light punch</span><span><kbd>E</kbd> heavy punch</span><span><kbd>Toward</kbd><kbd>Tab</kbd> throw</span></p>
+          <p><strong>Defend</strong><span><kbd>Q</kbd> block</span><span><kbd>Shift</kbd> dodge</span></p>
+          <p><strong>Technique</strong><span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Both Clicks</kbd> Teleport</span><span><kbd>F</kbd> Infinity</span><span><kbd>R</kbd> hold RCT</span></p>
+        </div>
+        <div id="rivalControls" class="rival-controls hidden">
+          <h3>Player 2 Local PVP</h3>
+          <p><strong>Move</strong><span><kbd>&larr;</kbd><kbd>&rarr;</kbd> walk</span><span><kbd>&uarr;</kbd> jump / double jump</span></p>
+          <p><strong>Attack</strong><span><kbd>N</kbd> light punch</span><span><kbd>M</kbd> heavy punch</span><span><kbd>Toward</kbd><kbd>N</kbd><kbd>M</kbd> back throw</span></p>
+          <p><strong>Defend</strong><span><kbd>P</kbd> block</span><span><kbd>/</kbd> dodge</span></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section id="homeScreen" class="home-screen" aria-label="home screen">
+    <div class="city-scene" aria-hidden="true">
+      <div class="cloud-layer cloud-back"></div>
+      <div class="cloud-layer cloud-front"></div>
+      <div class="lightning-flash"></div>
+      <div class="moon"></div>
+      <div class="fog-layer fog-back"></div>
+      <div class="building b1"></div>
+      <div class="building b2"></div>
+      <div class="building b3"></div>
+      <div class="building b4"></div>
+      <div class="building b5"></div>
+      <div class="building b6"></div>
+      <div class="building b7"></div>
+      <div class="neon-sign sign-left">RIFT</div>
+      <div class="neon-sign sign-right">VOID</div>
+      <div class="neon-sign sign-low">DOMAIN</div>
+      <div class="fog-layer fog-front"></div>
+      <div class="ember-field"></div>
+      <div class="traffic-lights"></div>
+      <div class="menu-car car-one"></div>
+      <div class="menu-car car-two"></div>
+      <div class="street-glow"></div>
+    </div>
+    <div class="home-panel">
+      <h1>Jujutsu Brawl</h1>
+      <div class="home-group mode-group hidden" aria-label="mode select">
+        <h2>Mode</h2>
+        <div class="home-actions">
+          <button id="cpuModeButton" type="button" aria-pressed="true">CPU</button>
+          <button id="pvpModeButton" type="button" aria-pressed="false">PVP</button>
+        </div>
+      </div>
+      <div id="cpuDifficultyPanel" class="home-group difficulty-group" aria-label="cpu difficulty">
+        <h2>CPU</h2>
+        <div class="home-actions">
+          <button class="difficulty-button" data-difficulty="easy" type="button" aria-pressed="false">Easy</button>
+          <button class="difficulty-button" data-difficulty="medium" type="button" aria-pressed="true">Medium</button>
+          <button class="difficulty-button" data-difficulty="hard" type="button" aria-pressed="false">Hard</button>
+        </div>
+      </div>
+      <div class="home-actions start-actions">
+        <button id="startFightButton" type="button">Start Fight</button>
+        <button id="practiceModeButton" type="button">Practice Mode</button>
+        <button class="settings-button" type="button">Settings</button>
+      </div>
+      <div class="home-group online-group" aria-label="online battle">
+        <h2>Online Battle</h2>
+        <label class="room-code-label" for="usernameInput">Name</label>
+        <input id="usernameInput" class="room-code-input username-input" type="text" placeholder="your name" maxlength="18" autocomplete="off">
+        <label class="room-code-label" for="roomCodeInput">Battle Code</label>
+        <input id="roomCodeInput" class="room-code-input" type="text" placeholder="enter code" maxlength="18" autocomplete="off">
+        <div class="home-actions">
+          <button id="hostBattleButton" type="button">Host Battle</button>
+          <button id="joinBattleButton" type="button">Join Battle</button>
+        </div>
+      </div>
+    </div>
+    <div class="music-volume-corner radio-compact" aria-label="radio">
+      <div class="radio-compact-header">
+        <button class="radio-open-button" type="button" aria-label="Open radio" title="Open radio">♪</button>
+        <div class="radio-track-text">
+          <strong class="radio-track-title">Loading</strong>
+          <span class="radio-track-artist">Radio</span>
+        </div>
+      </div>
+      <div class="radio-controls compact">
+        <button class="music-prev-button" type="button" aria-label="Previous song" title="Previous song">⏮</button>
+        <button class="music-toggle-button" type="button" aria-label="Pause music" aria-pressed="true" title="Pause music">⏸</button>
+        <button class="music-next-button" type="button" aria-label="Next song" title="Next song">⏭</button>
+      </div>
+      <div class="music-progress-row" aria-label="song progress">
+        <span class="music-time-current">0:00</span>
+        <div class="music-progress-track" role="progressbar" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="music-progress-fill"></div>
+        </div>
+        <span class="music-time-duration">--:--</span>
+      </div>
+      <div class="music-volume-row">
+        <label class="music-volume-label" for="musicVolumeSlider" aria-label="Music volume">
+          <span class="volume-icon" aria-hidden="true">🔊</span>
+          <strong id="musicVolumeValue" class="music-volume-value">85%</strong>
+        </label>
+        <input id="musicVolumeSlider" class="music-volume-slider" type="range" min="0" max="100" value="85" aria-label="Music volume">
+      </div>
+    </div>
+  </section>
+
+  <section id="techniqueScreen" class="technique-screen hidden" aria-label="technique select">
+    <div class="technique-panel">
+      <h2>Pick Your Character</h2>
+      <div class="technique-actions">
+        <button class="technique-button" data-technique="limitless" type="button">
+          <strong>Gojo</strong>
+          <canvas id="limitlessPreview" class="skin-preview-canvas" width="180" height="160" aria-label="Gojo character preview"></canvas>
+        </button>
+        <button class="technique-button" data-technique="shrine" type="button">
+          <strong>Sukuna</strong>
+          <canvas id="shrinePreview" class="skin-preview-canvas" width="180" height="160" aria-label="Sukuna character preview"></canvas>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section id="waitingScreen" class="waiting-screen hidden" aria-label="waiting for player">
+    <div class="waiting-panel">
+      <h2 id="waitingTitle">Waiting For Player 2</h2>
+      <p>Code: <strong id="waitingCode"></strong></p>
+      <span id="waitingCopy">Tell your friend to press Join Battle and enter this code.</span>
+      <button id="cancelOnlineButton" type="button">Cancel</button>
+    </div>
+  </section>
+
+  <section id="practiceSettingsScreen" class="practice-settings-screen hidden" aria-label="practice settings">
+    <div class="practice-settings-panel">
+      <h2>Practice Settings</h2>
+      <div class="practice-settings-list">
+        <div class="practice-setting-row">
+          <strong>Infinite CE</strong>
+          <div class="practice-toggle-group">
+            <button class="practice-setting-button" data-practice-setting="infiniteCe" data-value="on" type="button">On</button>
+            <button class="practice-setting-button" data-practice-setting="infiniteCe" data-value="off" type="button">Off</button>
+          </div>
+        </div>
+        <div class="practice-setting-row">
+          <strong>Dummy Damage</strong>
+          <div class="practice-toggle-group">
+            <button class="practice-setting-button" data-practice-setting="dummyDamage" data-value="on" type="button">On</button>
+            <button class="practice-setting-button" data-practice-setting="dummyDamage" data-value="off" type="button">Off</button>
+          </div>
+        </div>
+        <div class="practice-setting-row">
+          <strong>No Cooldowns</strong>
+          <div class="practice-toggle-group">
+            <button class="practice-setting-button" data-practice-setting="noCooldowns" data-value="on" type="button">On</button>
+            <button class="practice-setting-button" data-practice-setting="noCooldowns" data-value="off" type="button">Off</button>
+          </div>
+        </div>
+        <div class="practice-setting-row">
+          <strong>Stationary Dummy</strong>
+          <div class="practice-toggle-group">
+            <button class="practice-setting-button" data-practice-setting="stationaryDummy" data-value="on" type="button">On</button>
+            <button class="practice-setting-button" data-practice-setting="stationaryDummy" data-value="off" type="button">Off</button>
+          </div>
+        </div>
+      </div>
+      <button id="practiceSettingsCloseButton" type="button">Close</button>
+    </div>
+  </section>
+
+  <section id="pauseScreen" class="pause-screen hidden" aria-label="pause screen">
+    <div class="pause-panel">
+      <h2>Paused</h2>
+      <div class="home-actions">
+        <button id="resumeButton" type="button">Resume</button>
+        <button class="radio-open-button" type="button" aria-label="Open radio" title="Open radio">♪</button>
+        <button id="pauseRestartButton" type="button">Restart</button>
+        <button id="pauseSettingsButton" class="settings-button" type="button">Settings</button>
+      <button id="pauseHomeButton" type="button">Home</button>
+        <button class="settings-button" type="button">Settings</button>
+      </div>
+      <div class="pause-volume" aria-label="music volume">
+        <div class="radio-track-text">
+          <strong class="radio-track-title">Loading</strong>
+          <span class="radio-track-artist">Radio</span>
+        </div>
+        <div class="radio-controls compact">
+          <button class="music-prev-button" type="button" aria-label="Previous song" title="Previous song">⏮</button>
+          <button class="music-toggle-button" type="button" aria-label="Pause music" aria-pressed="true" title="Pause music">⏸</button>
+          <button class="music-next-button" type="button" aria-label="Next song" title="Next song">⏭</button>
+        </div>
+        <div class="music-progress-row" aria-label="song progress">
+          <span class="music-time-current">0:00</span>
+          <div class="music-progress-track" role="progressbar" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="music-progress-fill"></div>
+          </div>
+          <span class="music-time-duration">--:--</span>
+        </div>
+        <div class="music-volume-row">
+          <label class="music-volume-label" for="pauseMusicVolumeSlider" aria-label="Music volume"><span class="volume-icon" aria-hidden="true">🔊</span><strong id="pauseMusicVolumeValue" class="music-volume-value">85%</strong></label>
+          <input id="pauseMusicVolumeSlider" class="music-volume-slider" type="range" min="0" max="100" value="85" aria-label="Music volume">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="radioScreen" class="radio-screen hidden" aria-label="radio menu">
+    <div class="radio-panel">
+      <h2 aria-label="Radio">♪</h2>
+      <div class="radio-now-playing">
+        <strong class="radio-track-title">Loading</strong>
+        <em class="radio-track-artist">Radio</em>
+      </div>
+      <div class="radio-controls">
+        <button class="music-prev-button" type="button" aria-label="Previous song" title="Previous song">⏮</button>
+        <button class="music-toggle-button primary" type="button" aria-label="Pause music" aria-pressed="true" title="Pause music">⏸</button>
+        <button class="music-next-button" type="button" aria-label="Next song" title="Next song">⏭</button>
+      </div>
+      <div class="music-progress-row radio-progress-row" aria-label="song progress">
+        <span class="music-time-current">0:00</span>
+        <div class="music-progress-track" role="progressbar" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="music-progress-fill"></div>
+        </div>
+        <span class="music-time-duration">--:--</span>
+      </div>
+      <div class="music-volume-row radio-volume-row">
+        <label class="music-volume-label radio-volume-label" for="radioMusicVolumeSlider" aria-label="Music volume">
+          <span class="volume-icon" aria-hidden="true">🔊</span>
+          <strong id="radioMusicVolumeValue" class="music-volume-value">85%</strong>
+        </label>
+        <input id="radioMusicVolumeSlider" class="music-volume-slider" type="range" min="0" max="100" value="85" aria-label="Music volume">
+      </div>
+      <button id="radioCloseButton" type="button" aria-label="Close radio" title="Close radio">×</button>
+    </div>
+  </section>
+
+  <div id="message" class="message hidden">
+    <strong id="messageTitle">Round Over</strong>
+    <span id="messageCopy">Press Restart to fight again.</span>
+  </div>
+
+  <div id="readyPrompt" class="ready-prompt hidden">
+    <span id="readyStatus">Waiting For Other Player</span>
+    <button id="readyButton" class="ready-button hidden" type="button">Ready</button>
+  </div>
+
+  <div id="practiceDamageMeter" class="practice-damage-meter hidden" aria-live="polite">
+    <span>Damage</span>
+    <strong id="practiceDamageValue">0</strong>
+  </div>
+
+  <button id="practiceSettingsButton" class="practice-settings-float hidden" type="button">Practice Settings</button>
+
+
+  <section id="settingsScreen" class="settings-screen hidden" aria-label="settings">
+    <div class="settings-panel">
+      <h2>Settings</h2>
+      <label class="settings-row">Music Volume
+        <input class="music-volume-slider" type="range" min="0" max="100" value="85" aria-label="Music volume">
+      </label>
+      <label class="settings-row">Button Sound Volume
+        <input id="buttonSfxVolumeSlider" type="range" min="0" max="100" value="45" aria-label="Button sound volume">
+      </label>
+      <label class="settings-row">Game Sound Volume
+        <input id="gameSfxVolumeSlider" type="range" min="0" max="100" value="75" aria-label="Game sound volume">
+      </label>
+      
+        <button id="keybindsButton" class="settings-sub-button" type="button">Key Bindings</button>
+        <button id="settingsCloseButton" type="button">Close</button>
+    </div>
+  </section>
+
+  <div id="countdownOverlay" class="countdown-overlay hidden" aria-live="polite">3</div>
+
+
+  <section id="keybindScreen" class="keybind-screen hidden" aria-label="key binding settings">
+    <div class="keybind-panel">
+      <h2>Key Bindings</h2>
+      <p class="keybind-help">Click a Player 1 action, then press the key you want. Each key can only be used once.</p>
+      <div id="keybindList" class="keybind-list" aria-label="custom key bindings"></div>
+      <p id="keybindWarning" class="keybind-warning" role="alert"></p>
+      <div class="keybind-actions">
+        <button id="keybindResetButton" type="button">Reset Defaults</button>
+        <button id="keybindCloseButton" type="button">Done</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="game.js"></script>
+</body>
+</html>
