@@ -168,6 +168,7 @@ let keyBindings = loadKeyBindings();
 let listeningForKeybind = null;
 
 let localPlayerName = "Player";
+let onlinePlayerNames = { p1: "Player 1", p2: "Player 2" };
 let buttonSfxVolume = 0.45;
 let gameSfxVolume = 0.75;
 
