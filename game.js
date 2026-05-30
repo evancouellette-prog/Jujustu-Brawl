@@ -887,16 +887,18 @@ function startBackgroundMusic() {
 
 // KEYBIND_CAPTURE_HANDLER
 document.addEventListener("keydown", (event) => {
-  if (typeof listeningForKeybind !== "undefined" && listeningForKeybind) return;
+  if (typeof listeningForKeybind === "undefined" || !listeningForKeybind) return;
   event.preventDefault();
   event.stopPropagation();
+
   const action = listeningForKeybind;
-  if (event.code === getBoundKey("pause")) {
+  if (event.code === "Escape") {
     listeningForKeybind = null;
     if (keybindWarning) keybindWarning.textContent = "Cancelled.";
     renderKeybindList();
     return;
   }
+
   if (setKeyBinding(action, event.code)) {
     listeningForKeybind = null;
   }
@@ -1507,8 +1509,49 @@ const cpuSettings = {
   }
 };
 
+const KEY_ACTION_ALIASES = {
+  a: "moveLeft", keya: "moveLeft",
+  d: "moveRight", keyd: "moveRight",
+  " ": "jump", space: "jump",
+  w: "light", keyw: "light",
+  e: "heavy", keye: "heavy",
+  q: "block", keyq: "block",
+  shift: "dodge", shiftleft: "dodge", shiftright: "dodge",
+  r: "rct", keyr: "rct",
+  f: "infinity", keyf: "infinity",
+  t: "bluePunch", keyt: "bluePunch",
+  s: "specialAim", keys: "specialAim",
+  c: "ultimate", keyc: "ultimate",
+  tab: "throw",
+  arrowleft: "p2Left",
+  arrowright: "p2Right",
+  arrowup: "p2Jump",
+  n: "p2Light", keyn: "p2Light",
+  m: "p2Heavy", keym: "p2Heavy",
+  p: "p2Block", keyp: "p2Block",
+  "/": "p2Dodge", slash: "p2Dodge"
+};
+
+function normalizeKeyName(name) {
+  return String(name || "").toLowerCase();
+}
+
+function isEventForAction(action, key, code) {
+  const bound = normalizeKeyName(getBoundKey(action));
+  return normalizeKeyName(key) === bound || normalizeKeyName(code) === bound;
+}
+
 function isPressed(...names) {
-  return names.some((name) => keys.has(name));
+  return names.some((name) => {
+    const raw = normalizeKeyName(name);
+    if (keys.has(raw)) return true;
+
+    const action = KEY_ACTION_ALIASES[raw];
+    if (!action) return false;
+
+    const bound = normalizeKeyName(getBoundKey(action));
+    return keys.has(bound);
+  });
 }
 
 const attacks = {
@@ -2491,13 +2534,13 @@ function getOnlineInput() {
 }
 
 function getOnlineAction(key, code, repeat) {
-  if ((key === "w" || code === "keyw") && !repeat) return "light";
-  if ((key === "e" || code === "keye") && !repeat) return "heavy";
-  if (key === "shift" || code === "shiftleft" || code === "shiftright") return "dodge";
-  if ((key === " " || code === "space") && !repeat) return "jump";
-  if ((key === "f" || code === "keyf") && !repeat && enemy?.technique === "limitless") return "infinity";
-  if ((key === "c" || code === "keyc") && !repeat) return "ultimate-start";
-  if ((key === "s" || code === "keys") && !repeat) return enemy?.technique === "shrine" ? "fuga-start" : "teleport-start";
+  if (isEventForAction("light", key, code) && !repeat) return "light";
+  if (isEventForAction("heavy", key, code) && !repeat) return "heavy";
+  if (isEventForAction("dodge", key, code)) return "dodge";
+  if (isEventForAction("jump", key, code) && !repeat) return "jump";
+  if (isEventForAction("infinity", key, code) && !repeat && enemy?.technique === "limitless") return "infinity";
+  if (isEventForAction("ultimate", key, code) && !repeat) return "ultimate-start";
+  if (isEventForAction("specialAim", key, code) && !repeat) return enemy?.technique === "shrine" ? "fuga-start" : "teleport-start";
   return null;
 }
 
@@ -9393,7 +9436,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (homeOpen) return;
   if (paused) return;
-  if ((key === " " || code === "space") && !event.repeat && canUseKeyboardReady()) {
+  if (isEventForAction("jump", key, code) && !event.repeat && canUseKeyboardReady()) {
     playButtonClickSound();
     handleReadyClick();
     return;
@@ -9401,10 +9444,12 @@ window.addEventListener("keydown", (event) => {
   if (gameState !== "playing") return;
   keys.add(key);
   keys.add(code);
+  keys.add(event.key);
+  keys.add(event.code);
   if (gameMode === "online" && onlineRole === "p2") {
-    if (!event.repeat && (key === "w" || code === "keyw")) noteAttackButtonPress(enemy, "light");
-    if (!event.repeat && (key === "e" || code === "keye")) noteAttackButtonPress(enemy, "heavy");
-    if ((key === "tab" || code === "tab") && !event.repeat && startBackThrow(enemy, false)) {
+    if (!event.repeat && isEventForAction("light", key, code)) noteAttackButtonPress(enemy, "light");
+    if (!event.repeat && isEventForAction("heavy", key, code)) noteAttackButtonPress(enemy, "heavy");
+    if (isEventForAction("throw", key, code) && !event.repeat && startBackThrow(enemy, false)) {
       sendOnlineInput("backThrow");
       return;
     }
@@ -9419,15 +9464,15 @@ window.addEventListener("keydown", (event) => {
     sendOnlineInput(action);
     return;
   }
-  if (!event.repeat && (key === "w" || code === "keyw")) noteAttackButtonPress(player, "light");
-  if (!event.repeat && (key === "e" || code === "keye")) noteAttackButtonPress(player, "heavy");
-  if ((key === "tab" || code === "tab") && !event.repeat && startBackThrow(player, false)) return;
-  if (!event.repeat && (key === "w" || code === "keyw")) startAttack(player, "light");
-  if (!event.repeat && (key === "e" || code === "keye")) startAttack(player, "heavy");
+  if (!event.repeat && isEventForAction("light", key, code)) noteAttackButtonPress(player, "light");
+  if (!event.repeat && isEventForAction("heavy", key, code)) noteAttackButtonPress(player, "heavy");
+  if (isEventForAction("throw", key, code) && !event.repeat && startBackThrow(player, false)) return;
+  if (!event.repeat && isEventForAction("light", key, code)) startAttack(player, "light");
+  if (!event.repeat && isEventForAction("heavy", key, code)) startAttack(player, "heavy");
   if ((key === "f" || code === "keyf") && !event.repeat) {
     if (player.technique === "limitless") toggleInfinity(player);
   }
-  if ((key === "s" || code === "keys") && !event.repeat && !homeOpen && !paused && gameState === "playing") {
+  if (isEventForAction("specialAim", key, code) && !event.repeat && !homeOpen && !paused && gameState === "playing") {
     const fighter = gameMode === "online" && onlineRole === "p2" ? enemy : player;
     if (fighter?.technique === "shrine") {
       if (prepareFuga(fighter, mouseAimWorld) && gameMode === "online" && onlineRole === "p2") sendOnlineInput("fuga-start", mouseAimWorld);
@@ -9435,9 +9480,9 @@ window.addEventListener("keydown", (event) => {
       if (prepareTeleport(fighter, mouseAimWorld) && gameMode === "online" && onlineRole === "p2") sendOnlineInput("teleport-start", mouseAimWorld);
     }
   }
-  if ((key === "c" || code === "keyc") && !event.repeat) beginUltimateAim(player, mouseAimWorld);
+  if (isEventForAction("ultimate", key, code) && !event.repeat) beginUltimateAim(player, mouseAimWorld);
   if (key === "shift" || code === "shiftleft" || code === "shiftright") startDodge(player, getPlayerDodgeVector());
-  if ((key === " " || code === "space") && !event.repeat) jumpPlayer();
+  if (isEventForAction("jump", key, code) && !event.repeat) jumpPlayer();
   if (gameMode === "pvp") {
     if (!event.repeat && (key === "n" || code === "keyn")) noteAttackButtonPress(enemy, "light");
     if (!event.repeat && (key === "m" || code === "keym")) noteAttackButtonPress(enemy, "heavy");
@@ -9456,7 +9501,9 @@ window.addEventListener("keyup", (event) => {
   const releaseAction = getTechniqueReleaseAction(key, code);
   keys.delete(event.key.toLowerCase());
   keys.delete(event.code.toLowerCase());
-  if ((key === "s" || code === "keys") && !homeOpen && !paused && gameState === "playing") {
+  keys.delete(event.key);
+  keys.delete(event.code);
+  if (isEventForAction("specialAim", key, code) && !homeOpen && !paused && gameState === "playing") {
     const active = gameMode === "online" && onlineRole === "p2" ? enemy : player;
     if (active?.fugaAiming) {
       startFuga(active, active?.techniqueAim || mouseAimWorld);
@@ -9472,7 +9519,7 @@ window.addEventListener("keyup", (event) => {
     }
     clearSpecialHoldState(active);
   }
-  if ((key === "c" || code === "keyc") && !homeOpen && !paused && gameState === "playing") {
+  if (isEventForAction("ultimate", key, code) && !homeOpen && !paused && gameState === "playing") {
     const active = gameMode === "online" && onlineRole === "p2" ? enemy : player;
     const didRelease = releaseUltimateAim(active, active?.ultimateAimPoint || mouseAimWorld);
     if (gameMode === "online" && onlineRole === "p2") sendOnlineInput("ultimate-release", active?.ultimateAimPoint || mouseAimWorld);
@@ -9808,3 +9855,236 @@ window.addEventListener("error", (event) => {
   box.textContent = "JavaScript error:\n" + event.message + "\nLine: " + event.lineno + ":" + event.colno;
   if (!existing) document.body.appendChild(box);
 });
+
+
+// RELIABLE_BATTLE_BUTTONS_FIX
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+
+  if (button.id === "pauseButton") {
+    event.preventDefault();
+    if (typeof togglePause === "function") togglePause(true);
+    else if (typeof setPaused === "function") setPaused(true);
+    else {
+      paused = true;
+      if (pauseScreen) pauseScreen.classList.remove("hidden");
+    }
+    return;
+  }
+
+  if (button.id === "resumeButton") {
+    event.preventDefault();
+    if (typeof togglePause === "function") togglePause(false);
+    else if (typeof setPaused === "function") setPaused(false);
+    else {
+      paused = false;
+      if (pauseScreen) pauseScreen.classList.add("hidden");
+    }
+    return;
+  }
+
+  if (button.id === "homeButton" || button.id === "pauseHomeButton") {
+    event.preventDefault();
+    if (typeof returnHome === "function") returnHome();
+    else if (typeof showHome === "function") showHome();
+    else {
+      paused = false;
+      if (pauseScreen) pauseScreen.classList.add("hidden");
+      if (homeScreen) homeScreen.classList.remove("hidden");
+      gameState = "home";
+      homeOpen = true;
+    }
+    return;
+  }
+
+  if (button.id === "restartButton" || button.id === "pauseRestartButton") {
+    event.preventDefault();
+    paused = false;
+    if (pauseScreen) pauseScreen.classList.add("hidden");
+    if (typeof restartMatch === "function") restartMatch();
+    else if (typeof resetMatch === "function") resetMatch();
+    else if (typeof startSelectedMode === "function") startSelectedMode();
+    return;
+  }
+
+  if (button.id === "readyButton") {
+    event.preventDefault();
+    if (typeof setReady === "function") setReady();
+    else if (typeof markReady === "function") markReady();
+    else if (typeof handleReady === "function") handleReady();
+    else {
+      player1Ready = true;
+      if (gameMode !== "online") player2Ready = true;
+      if (typeof updateReadyPrompt === "function") updateReadyPrompt();
+      if (typeof maybeStartReadyCountdown === "function") maybeStartReadyCountdown();
+    }
+    return;
+  }
+
+  if (button.id === "practiceSettingsButton") {
+    event.preventDefault();
+    if (practiceSettingsScreen) practiceSettingsScreen.classList.remove("hidden");
+    return;
+  }
+
+  if (button.id === "practiceSettingsCloseButton") {
+    event.preventDefault();
+    if (practiceSettingsScreen) practiceSettingsScreen.classList.add("hidden");
+    return;
+  }
+
+  if (button.classList.contains("practice-setting-button")) {
+    event.preventDefault();
+    const key = button.dataset.setting || button.dataset.practiceSetting;
+    if (key && practiceSettings && Object.prototype.hasOwnProperty.call(practiceSettings, key)) {
+      practiceSettings[key] = !practiceSettings[key];
+      if (typeof updatePracticeSettingsUi === "function") updatePracticeSettingsUi();
+    }
+    return;
+  }
+
+  if (button.id === "radioCloseButton") {
+    event.preventDefault();
+    if (radioScreen) radioScreen.classList.add("hidden");
+    return;
+  }
+
+  if (button.classList.contains("radio-open-button")) {
+    event.preventDefault();
+    if (radioScreen) radioScreen.classList.remove("hidden");
+    return;
+  }
+
+  if (button.classList.contains("music-next-button")) {
+    event.preventDefault();
+    if (typeof playNextSong === "function") playNextSong();
+    return;
+  }
+
+  if (button.classList.contains("music-prev-button")) {
+    event.preventDefault();
+    if (typeof playPreviousSong === "function") playPreviousSong();
+    return;
+  }
+
+  if (button.classList.contains("music-toggle-button")) {
+    event.preventDefault();
+    if (typeof setMusicMuted === "function") setMusicMuted(!musicMuted);
+    return;
+  }
+}, true);
+
+
+
+// SUKUNA_MODEL_CLEANUP_PATCH
+function drawSukunaModelCleanup(f) {
+  if (!f || f.technique !== "shrine") return;
+
+  ctx.save();
+  const facing = f.dir || 1;
+  const centerX = f.x + f.w / 2;
+  const baseY = f.y;
+  ctx.translate(centerX, baseY);
+  ctx.scale(facing, 1);
+
+  const skin = "#e5ad98";
+  const tattoo = "#12030a";
+  const pantsLight = "rgba(255, 255, 255, 0.28)";
+
+  // Cover old extra eyes / old face details.
+  ctx.fillStyle = skin;
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(-16, 3, 32, 31, 9);
+    ctx.fill();
+  } else {
+    ctx.fillRect(-16, 3, 32, 31);
+  }
+
+  // Main eyes only.
+  ctx.strokeStyle = tattoo;
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-11, 16);
+  ctx.lineTo(-3, 14);
+  ctx.moveTo(11, 16);
+  ctx.lineTo(3, 14);
+  ctx.stroke();
+
+  // Show-like face tattoos.
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(0, 6);
+  ctx.lineTo(0, 13);
+  ctx.moveTo(-7, 9);
+  ctx.quadraticCurveTo(-12, 10, -14, 15);
+  ctx.moveTo(7, 9);
+  ctx.quadraticCurveTo(12, 10, 14, 15);
+  ctx.moveTo(-14, 22);
+  ctx.quadraticCurveTo(-8, 19, -3, 21);
+  ctx.moveTo(14, 22);
+  ctx.quadraticCurveTo(8, 19, 3, 21);
+  ctx.moveTo(-5, 28);
+  ctx.lineTo(-1, 33);
+  ctx.moveTo(5, 28);
+  ctx.lineTo(1, 33);
+  ctx.stroke();
+
+  // Body tattoos.
+  ctx.lineWidth = 2.8;
+  ctx.beginPath();
+  ctx.moveTo(-18, 47);
+  ctx.quadraticCurveTo(-7, 54, 0, 48);
+  ctx.quadraticCurveTo(7, 54, 18, 47);
+  ctx.moveTo(-19, 62);
+  ctx.lineTo(-7, 69);
+  ctx.moveTo(19, 62);
+  ctx.lineTo(7, 69);
+  ctx.moveTo(-25, 51);
+  ctx.lineTo(-15, 57);
+  ctx.moveTo(25, 51);
+  ctx.lineTo(15, 57);
+  ctx.stroke();
+
+  // Paint over shoes with bare feet.
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.ellipse(-13, 93, 14, 6, 0.04, 0, Math.PI * 2);
+  ctx.ellipse(13, 93, 14, 6, -0.04, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = tattoo;
+  ctx.lineWidth = 1.35;
+  ctx.beginPath();
+  ctx.moveTo(-24, 93);
+  ctx.quadraticCurveTo(-14, 97, -2, 93);
+  ctx.moveTo(2, 93);
+  ctx.quadraticCurveTo(14, 97, 24, 93);
+  ctx.stroke();
+
+  // Pants detail.
+  ctx.strokeStyle = pantsLight;
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-22, 66);
+  ctx.lineTo(22, 66);
+  ctx.moveTo(-18, 73);
+  ctx.quadraticCurveTo(-10, 79, -15, 90);
+  ctx.moveTo(-6, 69);
+  ctx.quadraticCurveTo(-2, 80, -7, 91);
+  ctx.moveTo(18, 73);
+  ctx.quadraticCurveTo(10, 79, 15, 90);
+  ctx.moveTo(6, 69);
+  ctx.quadraticCurveTo(2, 80, 7, 91);
+  ctx.moveTo(-19, 82);
+  ctx.lineTo(-5, 84);
+  ctx.moveTo(19, 82);
+  ctx.lineTo(5, 84);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
