@@ -2973,3 +2973,14 @@ button.hidden {
   text-shadow: none !important;
   filter: none !important;
 }
+/* Pause menu Settings button: match Restart/Home yellow style */
+#pauseScreen #pauseSettingsButton {
+  background: #d6b84d;
+  color: #1a1a1d;
+  border-color: #edf2ff;
+  box-shadow: 0 4px 0 #7b5a18;
+}
+
+#pauseScreen #pauseSettingsButton:active {
+  box-shadow: 0 2px 0 #7b5a18;
+}
