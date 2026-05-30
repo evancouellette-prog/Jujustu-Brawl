@@ -2919,3 +2919,11 @@ button.hidden {
   justify-self: end !important;
   margin-left: 4px !important;
 }
+/* Allow lowercase letters in player names */
+.username-input,
+#usernameInput,
+.player-name,
+#playerName,
+#enemyName {
+  text-transform: none !important;
+}
