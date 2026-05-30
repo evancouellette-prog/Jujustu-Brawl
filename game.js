@@ -5925,6 +5925,7 @@ function applyInfinitySlowToProjectile(projectile) {
 function updateProjectiles() {
   const activeProjectiles = [];
   for (const p of projectiles) {
+    p.visualSpawnAge = (p.visualSpawnAge || 0) + 1; // VISUAL_SPAWN_AGE_INCREMENT_PATCH
     if (p.move === "cleave") {
       p.vx *= 0.84;
       p.vy = (p.vy || 0) * 0.84;
@@ -6970,37 +6971,60 @@ function getTechniqueSkin(f, flash) {
 }
 
 function drawInfinityField(f) {
-  if (!isInfinityActive(f)) return;
+  if (!isInfinityActive(f)) {
+    f.infinityVisualAge = 0;
+    return;
+  }
+
+  f.infinityVisualAge = Math.min(14, (f.infinityVisualAge || 0) + 1);
+
   const center = getFighterCenter(f);
   const fieldY = center.y - 8;
-  const pulse = 1 + Math.sin((f.infinityPulse || frame) * 0.13) * 0.035;
-  const radius = INFINITY_RADIUS * pulse;
+  const grow = Math.min(1, f.infinityVisualAge / 14);
+  const easedGrow = 1 - Math.pow(1 - grow, 3);
+  const pulse = 1 + Math.sin((f.infinityPulse || frame) * 0.16) * 0.045;
+  const radius = INFINITY_RADIUS * pulse * easedGrow;
   const ceRatio = Math.max(0, Math.min(1, f.ce / f.maxCe));
+  const spin = frame * 0.035;
 
   ctx.save();
-  const glow = ctx.createRadialGradient(center.x, fieldY, radius * 0.2, center.x, fieldY, radius);
-  glow.addColorStop(0, `rgba(125, 211, 252, ${0.04 + ceRatio * 0.03})`);
-  glow.addColorStop(0.62, "rgba(56, 189, 248, 0.045)");
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = Math.min(1, 0.2 + easedGrow * 0.8);
+
+  const glow = ctx.createRadialGradient(center.x, fieldY, Math.max(1, radius * 0.12), center.x, fieldY, Math.max(2, radius * 1.18));
+  glow.addColorStop(0, `rgba(224, 242, 254, ${0.10 + ceRatio * 0.05})`);
+  glow.addColorStop(0.42, `rgba(56, 189, 248, ${0.12 + ceRatio * 0.06})`);
+  glow.addColorStop(0.78, "rgba(37, 99, 235, 0.08)");
   glow.addColorStop(1, "rgba(14, 165, 233, 0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(center.x, fieldY, radius, 0, Math.PI * 2);
+  ctx.arc(center.x, fieldY, Math.max(1, radius * 1.2), 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = `rgba(191, 219, 254, ${0.42 + ceRatio * 0.26})`;
-  ctx.lineWidth = 2.5;
-  ctx.setLineDash([9, 12]);
-  ctx.lineDashOffset = -frame * 0.6;
-  ctx.beginPath();
-  ctx.arc(center.x, fieldY, radius, 0, Math.PI * 2);
-  ctx.stroke();
+  for (let i = 0; i < 3; i += 1) {
+    const r = radius * (0.72 + i * 0.16);
+    ctx.strokeStyle = `rgba(191, 219, 254, ${0.42 - i * 0.08})`;
+    ctx.lineWidth = 2 + i * 0.9;
+    ctx.setLineDash(i === 1 ? [13, 9] : [7, 13]);
+    ctx.lineDashOffset = -(frame * (0.65 + i * 0.25));
+    ctx.beginPath();
+    ctx.ellipse(center.x, fieldY, Math.max(1, r * (1 + i * 0.02)), Math.max(1, r * (0.88 + i * 0.03)), spin * (i + 1), 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.setLineDash([]);
 
-  ctx.strokeStyle = "rgba(56, 189, 248, 0.24)";
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(center.x, fieldY, radius * 0.92, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.strokeStyle = "rgba(125, 211, 252, 0.7)";
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 7; i += 1) {
+    const a = frame * 0.035 + i * Math.PI * 2 / 7;
+    const x = center.x + Math.cos(a) * radius * 0.85;
+    const y = fieldY + Math.sin(a) * radius * 0.72;
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2 + Math.sin(frame * 0.1 + i) * 0.9, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.globalCompositeOperation = "source-over";
   ctx.restore();
 }
 
@@ -9141,6 +9165,9 @@ function drawProjectiles() {
     } else if (p.move === "red") {
       if (hasProjectileAngle) ctx.rotate(projectileAngle);
       else ctx.scale(p.dir, 1);
+      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
+      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_RED_GROW_PATCH
+      ctx.scale(visualScale, visualScale);
       const pulse = 1 + Math.sin(frame * 0.34) * 0.08;
       const redGlow = ctx.createRadialGradient(0, 0, p.radius * 0.15, 0, 0, p.radius * 1.75 * pulse);
       redGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
@@ -9177,6 +9204,9 @@ function drawProjectiles() {
       ctx.arc(0, 0, p.radius * 1.02, frame * 0.18, frame * 0.18 + Math.PI * 1.15);
       ctx.stroke();
     } else if (p.move === "blue") {
+      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
+      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_BLUE_GROW_PATCH
+      ctx.scale(visualScale, visualScale);
       const spin = frame * 0.16;
       const pulse = 1 + Math.sin(frame * 0.22) * 0.06;
       const blueGlow = ctx.createRadialGradient(0, 0, 1, 0, 0, p.radius * 1.8 * pulse);
