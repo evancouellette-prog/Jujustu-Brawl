@@ -31,10 +31,11 @@
     .ct-slot.cooling,
     .ct-slot.low-ce,
     .ct-slot.blocked {
-      background: #041d33 !important;
+      background: #031827 !important;
       border: 3px solid #e0f2fe !important;
-      box-shadow: 0 3px 0 rgba(2, 6, 23, 0.9), 0 0 14px rgba(56, 189, 248, 0.36) !important;
-      min-height: 54px !important;
+      box-shadow: 0 3px 0 rgba(2, 6, 23, 0.95), 0 0 14px rgba(56, 189, 248, 0.38) !important;
+      min-height: 60px !important;
+      padding: 6px !important;
     }
 
     .ct-slot .ct-meter,
@@ -42,9 +43,9 @@
     .ct-slot.cooling .ct-meter,
     .ct-slot.low-ce .ct-meter,
     .ct-slot.blocked .ct-meter {
-      background: rgba(2, 6, 23, 0.9) !important;
-      border: 1px solid rgba(248, 250, 252, 0.8) !important;
-      height: 10px !important;
+      background: rgba(2, 6, 23, 0.92) !important;
+      border: 1px solid rgba(248, 250, 252, 0.85) !important;
+      height: 11px !important;
     }
 
     .ct-slot .ct-fill,
@@ -61,9 +62,9 @@
     body.enemy-sukuna #enemyCt1Slot,
     body.enemy-sukuna #enemyCt2Slot,
     body.enemy-sukuna #enemyCt3Slot {
-      background: #330707 !important;
+      background: #280404 !important;
       border-color: #fee2e2 !important;
-      box-shadow: 0 3px 0 rgba(45, 10, 10, 0.95), 0 0 14px rgba(248, 113, 113, 0.38) !important;
+      box-shadow: 0 3px 0 rgba(45, 10, 10, 0.98), 0 0 14px rgba(248, 113, 113, 0.4) !important;
     }
 
     body.player-sukuna #playerCt1Slot .ct-fill,
@@ -79,76 +80,120 @@
     .ct-slot .ct-status {
       color: #ffffff !important;
       font-weight: 1000 !important;
-      letter-spacing: 0.05em !important;
-      text-shadow: 0 2px 0 #000, 0 0 6px #000, 0 0 10px #000 !important;
+      letter-spacing: 0.055em !important;
+      text-shadow: 0 2px 0 #000, 0 0 7px #000, 0 0 12px #000 !important;
+      line-height: 1.05 !important;
     }
 
     .ct-slot .ct-label {
-      font-size: 0.86rem !important;
-      background: rgba(0, 0, 0, 0.66) !important;
-      border: 1px solid rgba(255, 255, 255, 0.45) !important;
-      border-radius: 8px !important;
-      padding: 1px 6px !important;
+      font-size: 1rem !important;
+      background: rgba(0, 0, 0, 0.78) !important;
+      border: 2px solid rgba(255, 255, 255, 0.58) !important;
+      border-radius: 9px !important;
+      padding: 2px 8px !important;
       width: fit-content !important;
       margin-inline: auto !important;
     }
 
-    .ct-slot .ct-status {
-      font-size: 0.78rem !important;
-      background: rgba(0, 0, 0, 0.78) !important;
-      border: 1px solid rgba(255, 255, 255, 0.45) !important;
-      border-radius: 8px !important;
-      padding: 2px 7px !important;
+    .ct-slot .ct-status,
+    .ct-slot.ready .ct-status,
+    .ct-slot.cooling .ct-status,
+    .ct-slot.low-ce .ct-status,
+    .ct-slot.blocked .ct-status {
+      font-size: 0.95rem !important;
+      color: #ffffff !important;
+      background: rgba(0, 0, 0, 0.86) !important;
+      border: 2px solid rgba(255, 255, 255, 0.62) !important;
+      border-radius: 9px !important;
+      padding: 2px 8px !important;
+      box-shadow: none !important;
     }
 
     .extra-cooldowns {
-      gap: 6px !important;
+      gap: 7px !important;
+      align-items: stretch !important;
     }
 
-    .extra-cooldown {
+    .extra-cooldown,
+    .extra-cooldown.active {
+      position: relative !important;
+      overflow: hidden !important;
       color: #ffffff !important;
+      font-size: 0.98rem !important;
       font-weight: 1000 !important;
-      letter-spacing: 0.04em !important;
-      text-shadow: 0 2px 0 #000, 0 0 6px #000 !important;
+      letter-spacing: 0.045em !important;
+      text-shadow: 0 2px 0 #000, 0 0 7px #000, 0 0 12px #000 !important;
       background: #041d33 !important;
-      border: 2px solid #e0f2fe !important;
-      box-shadow: 0 2px 0 rgba(2, 6, 23, 0.85), 0 0 10px rgba(56, 189, 248, 0.3) !important;
-      border-radius: 10px !important;
-      padding: 4px 8px !important;
+      border: 3px solid #e0f2fe !important;
+      box-shadow: 0 2px 0 rgba(2, 6, 23, 0.9), 0 0 12px rgba(56, 189, 248, 0.32) !important;
+      border-radius: 11px !important;
+      padding: 5px 10px !important;
+      min-height: 28px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
+    .extra-cooldown::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: 1;
+      background: linear-gradient(90deg, rgba(29, 78, 216, 0.95), rgba(56, 189, 248, 0.92), rgba(224, 242, 254, 0.72));
     }
 
     .extra-cooldown.blue-extra,
-    .extra-cooldown.blue-amp-extra {
-      background: #0c4a6e !important;
-      border-color: #bae6fd !important;
-      box-shadow: 0 2px 0 #082f49, 0 0 12px rgba(56, 189, 248, 0.45) !important;
+    .extra-cooldown.blue-extra.active,
+    .extra-cooldown.blue-amp-extra,
+    .extra-cooldown.blue-amp-extra.active {
+      background: #075985 !important;
+      border-color: #e0f2fe !important;
+      box-shadow: 0 2px 0 #082f49, 0 0 14px rgba(56, 189, 248, 0.52) !important;
     }
 
-    .extra-cooldown.rct-extra {
-      background: #14532d !important;
-      border-color: #bbf7d0 !important;
-      box-shadow: 0 2px 0 #052e16, 0 0 12px rgba(34, 197, 94, 0.42) !important;
+    .extra-cooldown.blue-extra::before,
+    .extra-cooldown.blue-amp-extra::before {
+      background: linear-gradient(90deg, #1d4ed8, #38bdf8, #e0f2fe) !important;
+    }
+
+    .extra-cooldown.rct-extra,
+    .extra-cooldown.rct-extra.active,
+    body.player-sukuna #playerExtraCooldowns .extra-cooldown.rct-extra,
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown.rct-extra {
+      background: #166534 !important;
+      border-color: #dcfce7 !important;
+      box-shadow: 0 2px 0 #052e16, 0 0 14px rgba(34, 197, 94, 0.48) !important;
+    }
+
+    .extra-cooldown.rct-extra::before {
+      background: linear-gradient(90deg, #15803d, #22c55e, #dcfce7) !important;
     }
 
     .extra-cooldown.stun-extra,
-    .extra-cooldown.combo-extra {
+    .extra-cooldown.stun-extra.active,
+    .extra-cooldown.combo-extra,
+    .extra-cooldown.combo-extra.active {
       background: #7c2d12 !important;
-      border-color: #fed7aa !important;
-      box-shadow: 0 2px 0 #431407, 0 0 12px rgba(251, 146, 60, 0.42) !important;
+      border-color: #ffedd5 !important;
+      box-shadow: 0 2px 0 #431407, 0 0 14px rgba(251, 146, 60, 0.5) !important;
     }
 
-    body.player-sukuna #playerExtraCooldowns .extra-cooldown,
-    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown {
+    .extra-cooldown.stun-extra::before,
+    .extra-cooldown.combo-extra::before {
+      background: linear-gradient(90deg, #c2410c, #fb923c, #ffedd5) !important;
+    }
+
+    body.player-sukuna #playerExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra),
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra) {
       background: #330707 !important;
       border-color: #fecaca !important;
       box-shadow: 0 2px 0 #1f0505, 0 0 10px rgba(248, 113, 113, 0.36) !important;
     }
 
-    body.player-sukuna #playerExtraCooldowns .extra-cooldown.rct-extra,
-    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown.rct-extra {
-      background: #14532d !important;
-      border-color: #bbf7d0 !important;
-      box-shadow: 0 2px 0 #052e16, 0 0 12px rgba(34, 197, 94, 0.42) !important;
+    body.player-sukuna #playerExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra)::before,
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra)::before {
+      background: linear-gradient(90deg, #991b1b, #ef4444, #fee2e2) !important;
     }
 
     body.technique-charging #playerCt1Slot,
