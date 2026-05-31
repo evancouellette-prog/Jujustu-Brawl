@@ -1,7 +1,4 @@
-// Small runtime UI cleanup.
-// Keeps dummy health visible while hiding dummy CE, ultimate, CT, and RCT/cooldown UI.
-// Also makes only the home-screen Settings button yellow.
-// Gojo cooldowns are blue; Sukuna cooldowns are red; charging/held attacks get orange-white.
+// Runtime UI cleanup for HUD readability and practice-mode display.
 (function () {
   "use strict";
 
@@ -78,7 +75,7 @@
 
     .ct-slot .ct-label,
     .ct-slot .ct-status {
-      color: #ffffff !important;
+      color: #fff !important;
       font-weight: 1000 !important;
       letter-spacing: 0.055em !important;
       text-shadow: 0 2px 0 #000, 0 0 7px #000, 0 0 12px #000 !important;
@@ -101,7 +98,7 @@
     .ct-slot.low-ce .ct-status,
     .ct-slot.blocked .ct-status {
       font-size: 0.95rem !important;
-      color: #ffffff !important;
+      color: #fff !important;
       background: rgba(0, 0, 0, 0.86) !important;
       border: 2px solid rgba(255, 255, 255, 0.62) !important;
       border-radius: 9px !important;
@@ -116,84 +113,73 @@
 
     .extra-cooldown,
     .extra-cooldown.active {
-      position: relative !important;
-      overflow: hidden !important;
-      color: #ffffff !important;
-      font-size: 0.98rem !important;
+      color: #fff !important;
+      font-size: 1.08rem !important;
       font-weight: 1000 !important;
-      letter-spacing: 0.045em !important;
+      letter-spacing: 0.05em !important;
       text-shadow: 0 2px 0 #000, 0 0 7px #000, 0 0 12px #000 !important;
-      background: #041d33 !important;
+      background: linear-gradient(90deg, #1d4ed8, #38bdf8, #e0f2fe) !important;
       border: 3px solid #e0f2fe !important;
-      box-shadow: 0 2px 0 rgba(2, 6, 23, 0.9), 0 0 12px rgba(56, 189, 248, 0.32) !important;
+      box-shadow: 0 2px 0 rgba(2, 6, 23, 0.92), 0 0 13px rgba(56, 189, 248, 0.42) !important;
       border-radius: 11px !important;
-      padding: 5px 10px !important;
-      min-height: 28px !important;
+      padding: 5px 11px !important;
+      min-height: 30px !important;
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
+      overflow: visible !important;
     }
 
-    .extra-cooldown::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      opacity: 1;
-      background: linear-gradient(90deg, rgba(29, 78, 216, 0.95), rgba(56, 189, 248, 0.92), rgba(224, 242, 254, 0.72));
+    .extra-cooldown::before,
+    .extra-cooldown::after {
+      display: none !important;
+      content: none !important;
     }
 
     .extra-cooldown.blue-extra,
     .extra-cooldown.blue-extra.active,
     .extra-cooldown.blue-amp-extra,
-    .extra-cooldown.blue-amp-extra.active {
-      background: #075985 !important;
-      border-color: #e0f2fe !important;
-      box-shadow: 0 2px 0 #082f49, 0 0 14px rgba(56, 189, 248, 0.52) !important;
-    }
-
-    .extra-cooldown.blue-extra::before,
-    .extra-cooldown.blue-amp-extra::before {
+    .extra-cooldown.blue-amp-extra.active,
+    .extra-cooldown.blue-status,
+    .extra-cooldown.blue-status.active,
+    .extra-cooldown.blue-amp-status,
+    .extra-cooldown.blue-amp-status.active {
       background: linear-gradient(90deg, #1d4ed8, #38bdf8, #e0f2fe) !important;
+      border-color: #e0f2fe !important;
+      box-shadow: 0 2px 0 #082f49, 0 0 14px rgba(56, 189, 248, 0.55) !important;
     }
 
     .extra-cooldown.rct-extra,
     .extra-cooldown.rct-extra.active,
+    .extra-cooldown.rct-status,
+    .extra-cooldown.rct-status.active,
     body.player-sukuna #playerExtraCooldowns .extra-cooldown.rct-extra,
-    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown.rct-extra {
-      background: #166534 !important;
-      border-color: #dcfce7 !important;
-      box-shadow: 0 2px 0 #052e16, 0 0 14px rgba(34, 197, 94, 0.48) !important;
-    }
-
-    .extra-cooldown.rct-extra::before {
+    body.player-sukuna #playerExtraCooldowns .extra-cooldown.rct-status,
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown.rct-extra,
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown.rct-status {
       background: linear-gradient(90deg, #15803d, #22c55e, #dcfce7) !important;
+      border-color: #dcfce7 !important;
+      box-shadow: 0 2px 0 #052e16, 0 0 14px rgba(34, 197, 94, 0.5) !important;
     }
 
     .extra-cooldown.stun-extra,
     .extra-cooldown.stun-extra.active,
     .extra-cooldown.combo-extra,
-    .extra-cooldown.combo-extra.active {
-      background: #7c2d12 !important;
-      border-color: #ffedd5 !important;
-      box-shadow: 0 2px 0 #431407, 0 0 14px rgba(251, 146, 60, 0.5) !important;
-    }
-
-    .extra-cooldown.stun-extra::before,
-    .extra-cooldown.combo-extra::before {
+    .extra-cooldown.combo-extra.active,
+    .extra-cooldown.stun-status,
+    .extra-cooldown.stun-status.active,
+    .extra-cooldown.combo-status,
+    .extra-cooldown.combo-status.active {
       background: linear-gradient(90deg, #c2410c, #fb923c, #ffedd5) !important;
+      border-color: #ffedd5 !important;
+      box-shadow: 0 2px 0 #431407, 0 0 14px rgba(251, 146, 60, 0.52) !important;
     }
 
-    body.player-sukuna #playerExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra),
-    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra) {
-      background: #330707 !important;
+    body.player-sukuna #playerExtraCooldowns .extra-cooldown:not(.rct-extra):not(.rct-status):not(.blue-extra):not(.blue-status):not(.blue-amp-extra):not(.blue-amp-status):not(.stun-extra):not(.stun-status):not(.combo-extra):not(.combo-status),
+    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown:not(.rct-extra):not(.rct-status):not(.blue-extra):not(.blue-status):not(.blue-amp-extra):not(.blue-amp-status):not(.stun-extra):not(.stun-status):not(.combo-extra):not(.combo-status) {
+      background: linear-gradient(90deg, #991b1b, #ef4444, #fee2e2) !important;
       border-color: #fecaca !important;
       box-shadow: 0 2px 0 #1f0505, 0 0 10px rgba(248, 113, 113, 0.36) !important;
-    }
-
-    body.player-sukuna #playerExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra)::before,
-    body.enemy-sukuna #enemyExtraCooldowns .extra-cooldown:not(.rct-extra):not(.blue-extra):not(.blue-amp-extra):not(.stun-extra):not(.combo-extra)::before {
-      background: linear-gradient(90deg, #991b1b, #ef4444, #fee2e2) !important;
     }
 
     body.technique-charging #playerCt1Slot,
@@ -237,8 +223,7 @@
   }
 
   function syncPracticeDummyHud() {
-    const active = isPracticeModeActive();
-    document.body.classList.toggle("practice-dummy-hud-active", active);
+    document.body.classList.toggle("practice-dummy-hud-active", isPracticeModeActive());
   }
 
   function syncCharacterCooldownColors() {
@@ -265,17 +250,48 @@
       .trim();
   }
 
-  function classifyExtraCooldowns() {
-    document.querySelectorAll(".extra-cooldown").forEach((el) => {
+  function typeForText(text) {
+    const lower = cleanLabel(text).toLowerCase();
+    if (lower.includes("blue amp")) return "blue-amp";
+    if (lower.includes("infinity") || lower.includes("blue")) return "blue";
+    if (lower.includes("rct")) return "rct";
+    if (lower.includes("stun")) return "stun";
+    if (lower.includes("combo")) return "combo";
+    return "";
+  }
+
+  function isStatusText(text) {
+    return /^(ready|on|off|low ce|\d+s|\d+\.\d+s|\d+)$/i.test(String(text || "").trim());
+  }
+
+  function clearExtraClasses(el) {
+    el.classList.remove(
+      "blue-extra", "blue-status", "blue-amp-extra", "blue-amp-status",
+      "rct-extra", "rct-status", "stun-extra", "stun-status", "combo-extra", "combo-status"
+    );
+  }
+
+  function classifyContainer(container) {
+    let lastType = "";
+    Array.from(container.querySelectorAll(".extra-cooldown")).forEach((el) => {
+      clearExtraClasses(el);
       const text = cleanLabel(el.textContent);
       if (text && text !== el.textContent) el.textContent = text;
-      const lower = text.toLowerCase();
-      el.classList.toggle("blue-extra", lower.includes("infinity"));
-      el.classList.toggle("blue-amp-extra", lower.includes("blue amp"));
-      el.classList.toggle("rct-extra", lower.includes("rct"));
-      el.classList.toggle("stun-extra", lower.includes("stun"));
-      el.classList.toggle("combo-extra", lower.includes("combo"));
+
+      let type = typeForText(text);
+      const status = isStatusText(text);
+      if (!type && status) type = lastType;
+      if (type && !status) lastType = type;
+
+      if (!type) return;
+      el.classList.add(`${type}-${status ? "status" : "extra"}`);
     });
+  }
+
+  function classifyExtraCooldowns() {
+    [document.getElementById("playerExtraCooldowns"), document.getElementById("enemyExtraCooldowns")]
+      .filter(Boolean)
+      .forEach(classifyContainer);
   }
 
   function syncUi() {
