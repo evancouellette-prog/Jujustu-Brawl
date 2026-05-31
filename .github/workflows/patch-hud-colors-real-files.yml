@@ -1,0 +1,146 @@
+name: Patch HUD colors in real files
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-hud:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, 'Patch HUD colors in real files') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch game.js and styles.css
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          game = Path('game.js')
+          text = game.read_text(encoding='utf-8')
+          original = text
+
+          # Rename the actual generated label, not just a display override.
+          text = text.replace('{ name: "AMP", current: f.bluePunchCooldown || 0, max: bluePunchMax }', '{ name: "Blue Amp", current: f.bluePunchCooldown || 0, max: bluePunchMax }')
+
+          # Add character-color classes to the 3 main CT cooldown boxes.
+          needle = 'hud.slot.classList.toggle("hidden", !move); if (!move) return;'
+          repl = 'hud.slot.classList.toggle("hidden", !move); hud.slot.classList.toggle("gojo-cooldown", f.technique === "limitless"); hud.slot.classList.toggle("sukuna-cooldown", f.technique === "shrine"); if (!move) return;'
+          if needle in text and 'hud.slot.classList.toggle("gojo-cooldown"' not in text:
+              text = text.replace(needle, repl, 1)
+
+          # Add character-color class to extra cooldown boxes.
+          needle2 = 'row.className = `extra-cooldown ct-slot ${ready ? "ready" : "cooling"}`;'
+          repl2 = 'row.className = `extra-cooldown ct-slot ${ready ? "ready" : "cooling"} ${f.technique === "shrine" ? "sukuna-cooldown" : "gojo-cooldown"}`;'
+          if needle2 in text:
+              text = text.replace(needle2, repl2, 1)
+
+          if text != original:
+              game.write_text(text, encoding='utf-8')
+
+          css = Path('styles.css')
+          style = css.read_text(encoding='utf-8')
+          marker = '/* CHATGPT_REAL_HUD_COLOR_FIX */'
+          block = r'''
+
+/* CHATGPT_REAL_HUD_COLOR_FIX */
+.ct-slot.gojo-cooldown,
+.ct-slot.gojo-cooldown.ready,
+.ct-slot.gojo-cooldown.cooling,
+.ct-slot.gojo-cooldown.low-ce,
+.ct-slot.gojo-cooldown.blocked,
+.extra-cooldown.gojo-cooldown,
+.extra-cooldown.gojo-cooldown.ready,
+.extra-cooldown.gojo-cooldown.cooling {
+  background: linear-gradient(90deg, #1558ff, #38bdf8, #dff7ff) !important;
+  border-color: #e0f2fe !important;
+  box-shadow: 0 3px 0 #082f49, 0 0 14px rgba(56, 189, 248, 0.48) !important;
+  color: #ffffff !important;
+}
+
+.ct-slot.gojo-cooldown .ct-fill,
+.ct-slot.gojo-cooldown.ready .ct-fill,
+.ct-slot.gojo-cooldown.cooling .ct-fill,
+.ct-slot.gojo-cooldown.low-ce .ct-fill,
+.ct-slot.gojo-cooldown.blocked .ct-fill,
+.extra-cooldown.gojo-cooldown .ct-fill,
+.extra-cooldown.gojo-cooldown.ready .ct-fill,
+.extra-cooldown.gojo-cooldown.cooling .ct-fill,
+.extra-cooldown.gojo-cooldown .extra-cooldown-fill,
+.extra-cooldown.gojo-cooldown.cooling .extra-cooldown-fill {
+  background: linear-gradient(90deg, #1558ff, #38bdf8, #dff7ff) !important;
+}
+
+.ct-slot.sukuna-cooldown,
+.ct-slot.sukuna-cooldown.ready,
+.ct-slot.sukuna-cooldown.cooling,
+.ct-slot.sukuna-cooldown.low-ce,
+.ct-slot.sukuna-cooldown.blocked,
+.extra-cooldown.sukuna-cooldown,
+.extra-cooldown.sukuna-cooldown.ready,
+.extra-cooldown.sukuna-cooldown.cooling {
+  background: linear-gradient(90deg, #991b1b, #ef4444, #fee2e2) !important;
+  border-color: #fee2e2 !important;
+  box-shadow: 0 3px 0 #1f0505, 0 0 14px rgba(248, 113, 113, 0.48) !important;
+  color: #ffffff !important;
+}
+
+.ct-slot.sukuna-cooldown .ct-fill,
+.ct-slot.sukuna-cooldown.ready .ct-fill,
+.ct-slot.sukuna-cooldown.cooling .ct-fill,
+.ct-slot.sukuna-cooldown.low-ce .ct-fill,
+.ct-slot.sukuna-cooldown.blocked .ct-fill,
+.extra-cooldown.sukuna-cooldown .ct-fill,
+.extra-cooldown.sukuna-cooldown.ready .ct-fill,
+.extra-cooldown.sukuna-cooldown.cooling .ct-fill,
+.extra-cooldown.sukuna-cooldown .extra-cooldown-fill,
+.extra-cooldown.sukuna-cooldown.cooling .extra-cooldown-fill {
+  background: linear-gradient(90deg, #991b1b, #ef4444, #fee2e2) !important;
+}
+
+.ct-slot.gojo-cooldown .ct-label,
+.ct-slot.gojo-cooldown .ct-status,
+.ct-slot.sukuna-cooldown .ct-label,
+.ct-slot.sukuna-cooldown .ct-status,
+.extra-cooldown .extra-cooldown-label,
+.extra-cooldown .extra-cooldown-status {
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 1000 !important;
+  text-shadow: 0 2px 0 #000, 0 0 8px #000, 0 0 13px #000 !important;
+  background: rgba(0, 0, 0, 0.78) !important;
+  border: 2px solid rgba(255, 255, 255, 0.7) !important;
+  border-radius: 9px !important;
+  padding: 2px 8px !important;
+  box-shadow: none !important;
+}
+
+.extra-cooldown.gojo-cooldown::before,
+.extra-cooldown.gojo-cooldown::after,
+.extra-cooldown.sukuna-cooldown::before,
+.extra-cooldown.sukuna-cooldown::after {
+  display: none !important;
+  content: none !important;
+}
+'''
+          if marker not in style:
+              css.write_text(style.rstrip() + block, encoding='utf-8')
+          PY
+      - name: Remove workflow and commit
+        run: |
+          git config user.name "ChatGPT"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-hud-colors-real-files.yml
+          git add game.js styles.css
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Patch HUD colors in real files"
+            git push
+          fi
