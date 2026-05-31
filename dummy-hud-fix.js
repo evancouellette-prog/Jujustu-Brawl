@@ -130,8 +130,21 @@
       overflow: visible !important;
     }
 
+    .extra-cooldown *,
+    .extra-cooldown.active * {
+      color: #fff !important;
+      font-weight: 1000 !important;
+      text-shadow: 0 2px 0 #000, 0 0 7px #000, 0 0 12px #000 !important;
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+
     .extra-cooldown::before,
-    .extra-cooldown::after {
+    .extra-cooldown::after,
+    .extra-cooldown *::before,
+    .extra-cooldown *::after {
       display: none !important;
       content: none !important;
     }
@@ -171,15 +184,23 @@
     document.body.classList.toggle("enemy-sukuna", panelIsSukuna("enemy"));
   }
 
+  function cleanTextNode(node) {
+    const original = node.nodeValue || "";
+    const fixed = original
+      .replace(/Blue\s*Amp/gi, "Blue Amp")
+      .replace(/\bAMP\b/g, "Blue Amp")
+      .replace(/\bAmp\b/g, "Blue Amp")
+      .replace(/Stun\s*Combo/gi, "Stun Combo");
+    if (fixed !== original) node.nodeValue = fixed;
+  }
+
   function cleanLabels() {
     document.querySelectorAll(".extra-cooldown").forEach((el) => {
-      const text = String(el.textContent || "")
-        .replace(/Blue\s*Amp/i, "Blue Amp")
-        .replace(/\bAmp\b/i, "Blue Amp")
-        .replace(/Stun\s*Combo/i, "Stun Combo")
-        .trim();
-      if (text && text !== el.textContent) el.textContent = text;
       el.className = "extra-cooldown" + (el.classList.contains("active") ? " active" : "");
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(cleanTextNode);
     });
   }
 
