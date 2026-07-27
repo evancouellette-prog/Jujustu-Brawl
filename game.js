@@ -16956,6 +16956,235 @@ function drawStageHazards() {
 }
 
 // ---- Stage backdrops -------------------------------------------------------
+// ==========================================================================
+// STAGE_ATMOSPHERE_PATCH: shared cinematic layer for every stage.
+// Each stage gets depth haze near the horizon, drifting ambient particles
+// on two parallax layers, optional light shafts, and a ground contact
+// gradient. Drawn inside the camera transform, so it parallaxes correctly.
+// ==========================================================================
+const STAGE_ATMOSPHERE = {
+  city: {
+    haze: "rgba(120, 140, 190, 0.30)", hazeTop: 250,
+    particle: "rgba(255, 226, 160, 0.75)", count: 34, size: 1.6, rise: -0.16, drift: 0.22,
+    shafts: { color: "rgba(255, 214, 150, 0.055)", count: 4, angle: 0.22 },
+    groundGlow: "rgba(120, 90, 130, 0.35)"
+  },
+  zen: {
+    haze: "rgba(255, 226, 180, 0.42)", hazeTop: 230,
+    particle: "rgba(255, 236, 200, 0.80)", count: 40, size: 2.1, rise: -0.06, drift: 0.42,
+    shafts: { color: "rgba(255, 218, 150, 0.085)", count: 5, angle: 0.3 },
+    groundGlow: "rgba(190, 150, 110, 0.34)"
+  },
+  protoss: {
+    haze: "rgba(45, 212, 191, 0.20)", hazeTop: 250,
+    particle: "rgba(120, 240, 226, 0.85)", count: 40, size: 1.9, rise: -0.30, drift: 0.16,
+    shafts: { color: "rgba(45, 212, 191, 0.07)", count: 4, angle: -0.16 },
+    groundGlow: "rgba(20, 150, 150, 0.40)"
+  },
+  village: {
+    haze: "rgba(120, 110, 160, 0.28)", hazeTop: 250,
+    particle: "rgba(255, 170, 90, 0.85)", count: 36, size: 2.0, rise: -0.34, drift: 0.30,
+    shafts: null,
+    groundGlow: "rgba(150, 80, 40, 0.36)"
+  },
+  rooftops: {
+    haze: "rgba(130, 150, 200, 0.30)", hazeTop: 240,
+    particle: "rgba(210, 226, 255, 0.55)", count: 30, size: 1.5, rise: -0.10, drift: 0.50,
+    shafts: { color: "rgba(180, 205, 255, 0.055)", count: 3, angle: 0.26 },
+    groundGlow: "rgba(90, 110, 160, 0.32)"
+  },
+  sunny: {
+    haze: "rgba(190, 226, 245, 0.38)", hazeTop: 230,
+    particle: "rgba(255, 255, 255, 0.65)", count: 30, size: 1.7, rise: -0.05, drift: 0.55,
+    shafts: { color: "rgba(255, 240, 190, 0.075)", count: 4, angle: 0.2 },
+    groundGlow: "rgba(40, 120, 175, 0.35)"
+  },
+  upsideDown: {
+    haze: "rgba(90, 20, 40, 0.32)", hazeTop: 250,
+    particle: "rgba(220, 190, 200, 0.55)", count: 46, size: 2.2, rise: -0.10, drift: 0.16,
+    shafts: { color: "rgba(190, 40, 70, 0.055)", count: 3, angle: -0.2 },
+    groundGlow: "rgba(90, 25, 45, 0.45)"
+  },
+  space: {
+    haze: "rgba(90, 80, 160, 0.18)", hazeTop: 260,
+    particle: "rgba(200, 210, 255, 0.85)", count: 44, size: 1.7, rise: -0.14, drift: 0.10,
+    shafts: null,
+    groundGlow: "rgba(70, 60, 130, 0.35)"
+  }
+};
+
+let atmosphereMotes = [];
+let atmosphereStageId = null;
+
+function ensureAtmosphereMotes() {
+  const atmo = STAGE_ATMOSPHERE[currentStageId];
+  if (!atmo) { atmosphereMotes = []; return null; }
+  if (atmosphereStageId !== currentStageId || atmosphereMotes.length !== atmo.count) {
+    atmosphereStageId = currentStageId;
+    atmosphereMotes = [];
+    for (let i = 0; i < atmo.count; i += 1) {
+      atmosphereMotes.push({
+        x: Math.random() * STAGE_W,
+        y: Math.random() * (GROUND + 60),
+        r: atmo.size * (0.55 + Math.random() * 0.9),
+        depth: Math.random() < 0.45 ? 0.55 : 1,   // two parallax layers
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.5 + Math.random()
+      });
+    }
+  }
+  return atmo;
+}
+
+// Behind the fighters: horizon haze, light shafts, far motes, ground glow.
+function drawStageAtmosphere() {
+  const atmo = ensureAtmosphereMotes();
+  if (!atmo) return;
+  ctx.save();
+
+  // depth haze fading up from the horizon line
+  const hazeGrad = ctx.createLinearGradient(0, atmo.hazeTop - 90, 0, GROUND);
+  hazeGrad.addColorStop(0, "rgba(0,0,0,0)");
+  hazeGrad.addColorStop(1, atmo.haze);
+  ctx.fillStyle = hazeGrad;
+  ctx.fillRect(-1200, atmo.hazeTop - 90, STAGE_W + 2400, GROUND - atmo.hazeTop + 90);
+
+  // volumetric light shafts angling down from off-screen. Each shaft fades
+  // in and out along its length so it reads as soft light, not a hard band.
+  if (atmo.shafts) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const spacing = STAGE_W / (atmo.shafts.count + 1);
+    for (let i = 1; i <= atmo.shafts.count; i += 1) {
+      const bx = spacing * i + Math.sin(frame * 0.004 + i) * 18;
+      const spread = 54 + Math.sin(frame * 0.006 + i * 1.7) * 10;
+      const lean = atmo.shafts.angle * GROUND;
+      const fade = ctx.createLinearGradient(0, -40, 0, GROUND);
+      fade.addColorStop(0, "rgba(0,0,0,0)");
+      fade.addColorStop(0.28, atmo.shafts.color);
+      fade.addColorStop(0.72, atmo.shafts.color);
+      fade.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = fade;
+      ctx.beginPath();
+      ctx.moveTo(bx - spread * 0.35, -40);
+      ctx.lineTo(bx + spread * 0.35, -40);
+      ctx.lineTo(bx + spread + lean, GROUND);
+      ctx.lineTo(bx - spread + lean, GROUND);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // far ambient motes (the shallow parallax layer)
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = atmo.particle;
+  for (const m of atmosphereMotes) {
+    if (m.depth > 0.7) continue;
+    m.x += (atmo.drift * m.speed) * m.depth;
+    m.y += (atmo.rise * m.speed) * m.depth;
+    if (m.x > STAGE_W + 40) m.x = -40;
+    if (m.x < -40) m.x = STAGE_W + 40;
+    if (m.y < -40) m.y = GROUND + 40;
+    if (m.y > GROUND + 60) m.y = -30;
+    ctx.globalAlpha = 0.35 + Math.sin(frame * 0.03 + m.phase) * 0.2;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, m.r * m.depth, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // soft contact glow where the ground meets the arena
+  const gg = ctx.createLinearGradient(0, GROUND - 70, 0, GROUND + 10);
+  gg.addColorStop(0, "rgba(0,0,0,0)");
+  gg.addColorStop(1, atmo.groundGlow);
+  ctx.fillStyle = gg;
+  ctx.fillRect(-1200, GROUND - 70, STAGE_W + 2400, 80);
+  ctx.restore();
+}
+
+// Over the fighters: the near parallax motes, for real depth separation.
+function drawStageForegroundAtmosphere() {
+  const atmo = STAGE_ATMOSPHERE[currentStageId];
+  if (!atmo || !atmosphereMotes.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = atmo.particle;
+  for (const m of atmosphereMotes) {
+    if (m.depth <= 0.7) continue;
+    m.x += atmo.drift * m.speed;
+    m.y += atmo.rise * m.speed;
+    if (m.x > STAGE_W + 40) m.x = -40;
+    if (m.x < -40) m.x = STAGE_W + 40;
+    if (m.y < -40) m.y = GROUND + 40;
+    if (m.y > GROUND + 60) m.y = -30;
+    ctx.globalAlpha = 0.3 + Math.sin(frame * 0.04 + m.phase) * 0.22;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ==========================================================================
+// CINEMATIC_POST_PATCH: screen-space finishing pass. A vignette plus a
+// per-stage color grade and a top light bloom, applied over the whole
+// frame. This is what makes the render read as "finished" rather than flat.
+// ==========================================================================
+const STAGE_GRADE = {
+  city:       { tint: "rgba(70, 90, 160, 0.10)", vignette: 0.55, bloom: "rgba(255, 210, 150, 0.07)" },
+  zen:        { tint: "rgba(255, 190, 120, 0.10)", vignette: 0.42, bloom: "rgba(255, 226, 170, 0.11)" },
+  protoss:    { tint: "rgba(20, 160, 160, 0.11)", vignette: 0.58, bloom: "rgba(90, 240, 220, 0.07)" },
+  village:    { tint: "rgba(120, 70, 140, 0.10)", vignette: 0.55, bloom: "rgba(255, 170, 90, 0.08)" },
+  rooftops:   { tint: "rgba(70, 100, 170, 0.10)", vignette: 0.52, bloom: "rgba(200, 220, 255, 0.06)" },
+  sunny:      { tint: "rgba(90, 170, 210, 0.08)", vignette: 0.40, bloom: "rgba(255, 240, 180, 0.12)" },
+  upsideDown: { tint: "rgba(120, 20, 45, 0.12)", vignette: 0.58, bloom: "rgba(190, 40, 70, 0.07)" },
+  space:      { tint: "rgba(60, 45, 130, 0.10)", vignette: 0.68, bloom: "rgba(150, 140, 255, 0.05)" }
+};
+let vignetteCache = null;
+
+function drawCinematicPost() {
+  const grade = STAGE_GRADE[currentStageId] || STAGE_GRADE.city;
+
+  // top-down light bloom
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const bloom = ctx.createLinearGradient(0, 0, 0, H * 0.6);
+  bloom.addColorStop(0, grade.bloom);
+  bloom.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = bloom;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // color grade
+  ctx.save();
+  ctx.globalCompositeOperation = "overlay";
+  ctx.fillStyle = grade.tint;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // vignette (cached radial gradient; only rebuilt when size/strength change)
+  if (!vignetteCache || vignetteCache.w !== W || vignetteCache.h !== H || vignetteCache.v !== grade.vignette) {
+    const vg = ctx.createRadialGradient(W / 2, H * 0.46, Math.min(W, H) * 0.32, W / 2, H * 0.5, Math.max(W, H) * 0.78);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(0.65, `rgba(0,0,0,${(grade.vignette * 0.32).toFixed(3)})`);
+    vg.addColorStop(1, `rgba(0,0,0,${grade.vignette.toFixed(3)})`);
+    vignetteCache = { w: W, h: H, v: grade.vignette, grad: vg };
+  }
+  ctx.fillStyle = vignetteCache.grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle letterbox edge darkening for a filmic frame
+  const edge = ctx.createLinearGradient(0, 0, 0, H);
+  edge.addColorStop(0, "rgba(0,0,0,0.30)");
+  edge.addColorStop(0.12, "rgba(0,0,0,0)");
+  edge.addColorStop(0.88, "rgba(0,0,0,0)");
+  edge.addColorStop(1, "rgba(0,0,0,0.34)");
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, W, H);
+}
+
 function stageSky(stops) {
   const sky = ctx.createLinearGradient(0, 0, 0, H);
   for (const [pos, col] of stops) sky.addColorStop(pos, col);
@@ -17041,8 +17270,67 @@ function drawProtossBase() {
 
 function drawSlayerVillage() {
   stageSky([[0, "#1b2340"], [0.5, "#3f3b63"], [1, "#241d33"]]);
-  // moon
+  // VILLAGE_DEPTH_PATCH: stars, a glowing moon and layered mountain ridges
+  // so the upper half of the frame is a real night sky, not empty gradient.
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 250, 230, 0.75)";
+  for (let i = 0; i < 70; i += 1) {
+    const sx = ((i * 197) % (STAGE_W + 400)) - 200;
+    const sy = ((i * 89) % 250) + 8;
+    const tw = 0.45 + Math.abs(Math.sin(frame * 0.02 + i)) * 0.55;
+    ctx.globalAlpha = tw * (i % 4 === 0 ? 0.9 : 0.5);
+    ctx.fillRect(sx, sy, i % 5 === 0 ? 2.4 : 1.6, i % 5 === 0 ? 2.4 : 1.6);
+  }
+  ctx.restore();
+  // moon halo + disc with craters
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const halo = ctx.createRadialGradient(1180, 120, 20, 1180, 120, 190);
+  halo.addColorStop(0, "rgba(242, 234, 208, 0.35)");
+  halo.addColorStop(1, "rgba(242, 234, 208, 0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(1180, 120, 190, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
   ctx.fillStyle = "#f2ead0"; ctx.beginPath(); ctx.arc(1180, 120, 52, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "rgba(190, 182, 158, 0.55)";
+  ctx.beginPath();
+  ctx.arc(1163, 106, 11, 0, Math.PI * 2);
+  ctx.arc(1197, 132, 8, 0, Math.PI * 2);
+  ctx.arc(1172, 141, 6, 0, Math.PI * 2);
+  ctx.fill();
+  // far mountain ridge, then a nearer darker ridge
+  ctx.fillStyle = "#2b2a4a";
+  ctx.beginPath();
+  ctx.moveTo(-200, 330);
+  ctx.lineTo(120, 190); ctx.lineTo(300, 268); ctx.lineTo(520, 150);
+  ctx.lineTo(760, 264); ctx.lineTo(980, 196); ctx.lineTo(1240, 286);
+  ctx.lineTo(1480, 178); ctx.lineTo(1760, 280); ctx.lineTo(STAGE_W + 200, 224);
+  ctx.lineTo(STAGE_W + 200, GROUND); ctx.lineTo(-200, GROUND);
+  ctx.closePath(); ctx.fill();
+  // snow caps
+  ctx.fillStyle = "rgba(226, 226, 245, 0.45)";
+  for (const [px, py] of [[520, 150], [1480, 178], [120, 190]]) {
+    ctx.beginPath();
+    ctx.moveTo(px, py); ctx.lineTo(px - 26, py + 34); ctx.lineTo(px - 8, py + 26);
+    ctx.lineTo(px + 6, py + 34); ctx.lineTo(px + 24, py + 32);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = "#20203a";
+  ctx.beginPath();
+  ctx.moveTo(-200, 360);
+  ctx.lineTo(220, 268); ctx.lineTo(460, 330); ctx.lineTo(700, 250);
+  ctx.lineTo(980, 336); ctx.lineTo(1300, 262); ctx.lineTo(1620, 340);
+  ctx.lineTo(1900, 274); ctx.lineTo(STAGE_W + 200, 320);
+  ctx.lineTo(STAGE_W + 200, GROUND); ctx.lineTo(-200, GROUND);
+  ctx.closePath(); ctx.fill();
+  // low valley mist between the ridges and the village
+  ctx.save();
+  const mist = ctx.createLinearGradient(0, 300, 0, 400);
+  mist.addColorStop(0, "rgba(150, 150, 200, 0)");
+  mist.addColorStop(1, "rgba(150, 150, 200, 0.22)");
+  ctx.fillStyle = mist;
+  ctx.fillRect(-1200, 300, STAGE_W + 2400, 100);
+  ctx.restore();
   // pine tree silhouettes
   ctx.fillStyle = "#141a2a";
   for (let i = 0; i < 9; i++) {
@@ -17931,6 +18219,15 @@ const PLATFORM_THEMES = {
 function drawPlatforms() {
   const theme = PLATFORM_THEMES[currentStageId] || PLATFORM_THEMES.city;
   for (const platform of getActivePlatforms()) {
+    // PLATFORM_DEPTH_PATCH: an ambient drop shadow under each platform so it
+    // sits in the world instead of floating flat against the backdrop.
+    ctx.save();
+    const ps = ctx.createLinearGradient(0, platform.y + platform.h, 0, platform.y + platform.h + 22);
+    ps.addColorStop(0, "rgba(0,0,0,0.30)");
+    ps.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = ps;
+    ctx.fillRect(platform.x + 6, platform.y + platform.h, platform.w - 12, 22);
+    ctx.restore();
     if (theme.glow) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -17948,6 +18245,16 @@ function drawPlatforms() {
     ctx.fillRect(platform.x + 4, platform.y + 3, platform.w - 8, 3);
     ctx.fillStyle = theme.edge;
     ctx.fillRect(platform.x, platform.y + platform.h - 4, platform.w, 4);
+    // PLATFORM_DEPTH_PATCH: crisp top highlight + darkened ends for volume
+    ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.fillRect(platform.x + 2, platform.y, platform.w - 4, 1.5);
+    const ends = ctx.createLinearGradient(platform.x, 0, platform.x + platform.w, 0);
+    ends.addColorStop(0, "rgba(0,0,0,0.35)");
+    ends.addColorStop(0.12, "rgba(0,0,0,0)");
+    ends.addColorStop(0.88, "rgba(0,0,0,0)");
+    ends.addColorStop(1, "rgba(0,0,0,0.35)");
+    ctx.fillStyle = ends;
+    ctx.fillRect(platform.x, platform.y, platform.w, platform.h);
     if (theme.stud) {
       ctx.fillStyle = theme.rivet;
       for (let x = platform.x + 20; x < platform.x + platform.w - 12; x += 42) {
@@ -20132,14 +20439,45 @@ function drawFighterShadow(f) {
   // Shadow now casts onto the closest platform under the fighter.
   // It also shrinks/fades the higher the fighter is above that surface.
   const scale = Math.max(0.28, 1 - Math.min(heightAboveSurface, 390) / 390 * 0.72);
-  const alpha = Math.max(0.08, 0.34 * scale);
-  const shadowW = Math.max(12, f.w * 0.95 * scale);
-  const shadowH = Math.max(3.5, 12 * scale);
+  const alpha = Math.max(0.08, 0.40 * scale);
+  const shadowW = Math.max(12, f.w * 1.05 * scale);
+  const shadowH = Math.max(3.5, 13 * scale);
+  const cx = f.x + f.w / 2;
+  const cy = surface.y + 4;
 
-  ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+  // SOFT_SHADOW_PATCH: a radial falloff instead of a hard ellipse, so the
+  // contact shadow reads as real diffuse occlusion.
+  ctx.save();
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, shadowW);
+  grad.addColorStop(0, `rgba(0, 0, 0, ${alpha.toFixed(3)})`);
+  grad.addColorStop(0.55, `rgba(0, 0, 0, ${(alpha * 0.62).toFixed(3)})`);
+  grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.ellipse(f.x + f.w / 2, surface.y + 4, shadowW, shadowH, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, shadowW, shadowH, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+// FIGHTER_BACKLIGHT_PATCH: a soft stage-tinted halo behind each fighter so
+// they separate from busy backdrops instead of blending into them.
+function drawFighterBacklight(f) {
+  if (!f || f.ko) return;
+  const atmo = STAGE_ATMOSPHERE[currentStageId];
+  if (!atmo) return;
+  const cx = f.x + f.w / 2;
+  const cy = f.y + f.h * 0.45;
+  const r = Math.max(f.w, f.h) * 0.95;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const halo = ctx.createRadialGradient(cx, cy, r * 0.25, cx, cy, r);
+  halo.addColorStop(0, atmo.particle.replace(/[\d.]+\)$/, "0.10)"));
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawRyukPunchAssist(f, attack, active) {
@@ -26889,6 +27227,7 @@ function draw() {
   ctx.scale(cameraZoom, cameraZoom);
   ctx.translate(-cameraX, 0);
   getStage().draw(); // STAGE_SELECT_PATCH
+  if (!activeDomain && !pendingDomain && !domainClash) drawStageAtmosphere(); // STAGE_ATMOSPHERE_PATCH
   drawUpsideDownBackdrop(); // VECNA_PATCH
   drawActiveDomainBackdrop();
 
@@ -26902,6 +27241,10 @@ function draw() {
   drawEffects();
   if (stageHazardsEnabled) drawStageHazards(); // STAGE_SELECT_PATCH (behind fighters)
   drawDavePlants(); // DAVE_PATCH: plants behind the fighters
+  if (!activeDomain && !pendingDomain && !domainClash) { // FIGHTER_BACKLIGHT_PATCH
+    drawFighterBacklight(player);
+    drawFighterBacklight(enemy);
+  }
   drawFighter(player, getPlayerLabel(), getPlayerLabelColor());
   drawFighter(enemy, getEnemyLabel(), getEnemyLabelColor());
   drawVecnaMinions(); // VECNA_MINION_DRAW_PATCH: over fighters
@@ -26909,7 +27252,9 @@ function draw() {
   drawUpsideDownSpider(); // VECNA_PATCH
   drawTechniqueAimSizePreview();
   drawShieldBreakEffects();
+  if (!activeDomain && !pendingDomain && !domainClash) drawStageForegroundAtmosphere(); // STAGE_ATMOSPHERE_PATCH
   ctx.restore();
+  drawCinematicPost(); // CINEMATIC_POST_PATCH: vignette + grade + bloom
   drawUltimateScreenEffects();
   drawUltCutscene(); // ULT_CUTSCENES_PATCH
   drawDavidGlitchOverlay(); // DAVID_PATCH
