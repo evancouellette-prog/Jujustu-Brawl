@@ -4225,6 +4225,10 @@ function getTechniqueHudMoves(f) {
   }
   if (f.technique === "david") return ["gorillaArms", "projectileLauncher", "sandevistan"]; // DAVID_PATCH
   if (f.technique === "akira") return ["joyRide", "voltPunch", "overtime"]; // AKIRA_PATCH
+  // DAVE_PATCH: Dave has four seed packets plus Plant Food, which don't fit
+  // the three CT slots - the extra-cooldown row below shows all of them with
+  // their real per-plant cooldowns, so this row is hidden entirely.
+  if (f.technique === "gardener") return [];
   return ["blue", "red", "teleport"];
 }
 
@@ -6988,6 +6992,29 @@ function getExtraCooldownItems(f) {
     return items;
   }
 
+  // DAVE_PATCH: seed packet cooldowns, garden capacity, Plant Food and the
+  // Crazy Garden timer. No JJK rows at all.
+  if (f.technique === "gardener") {
+    const loadout = getDaveLoadout();
+    const cds = f.davePlantCooldowns || {};
+    // short names so they fit the meter row without clipping
+    const shortName = {
+      peashooter: "PEA", sunflower: "SUN FLR", wallnut: "WALNUT", cherrybomb: "CHERRY",
+      snowpea: "SNOW", bonkchoy: "BONK", potatomine: "TATER", chomper: "CHOMP"
+    };
+    for (const id of loadout) {
+      const spec = DAVE_PLANT_SPECS[id];
+      if (!spec) continue;
+      items.push({ name: shortName[id] || spec.name.toUpperCase(), current: cds[id] || 0, max: spec.cooldown });
+    }
+    items.push({ name: "GARDEN", current: ownedDavePlants(f).length, max: davePlantLimit(f), mode: "resource" });
+    items.push({ name: "FOOD", current: f.davePlantFoodCooldown || 0, max: DAVE_PLANTFOOD_COOLDOWN });
+    if ((f.daveUltTicks || 0) > 0) {
+      items.push({ name: "CRAZY GARDEN", current: f.daveUltTicks, max: DAVE_ULT_TICKS, mode: "active" });
+    }
+    return items;
+  }
+
   // SPIDER_PATCH: Spider Rush + ultimate timer, nothing JJK.
   if (f.technique === "spider") {
     const opp = getOpponent(f);
@@ -7115,7 +7142,9 @@ function updateExtraCooldownHud(container, f) {
     status.textContent = isResource
       ? item.name === "NAME"
         ? ready ? "FOUND" : "SEARCH"
-        : item.name === "INFORMATION" ? "METER" : "ACTIVE"
+        : item.name === "INFORMATION" ? "METER"
+        // DAVE_PATCH: garden capacity reads as a count, not a buff state.
+        : item.name === "GARDEN" ? `${item.current}/${item.max}` : "ACTIVE"
       : ready ? "READY" : isActiveBuff ? `${Math.ceil(item.current / 60)}s ACTIVE` : `${Math.ceil(item.current / 60)}s`;
 
     meter.appendChild(fill);
@@ -7156,7 +7185,7 @@ function updateResourceBarLabels() {
   const playerUltFrame = playerUltimateEl ? playerUltimateEl.closest(".ultimate-frame") : null;
   const enemyUltFrame = enemyUltimateEl ? enemyUltimateEl.closest(".ultimate-frame") : null;
 
-  ensureResourceBarLabel(playerCeFrame, isLight(player) ? "Information" : player?.technique === "jiji" ? "Rage" : player?.technique === "david" ? "Cyberware Load" : player?.technique === "akira" ? "Work" : player?.technique === "brawler" || player?.technique === "blackleg" || player?.technique === "hivemind" || player?.technique === "zealot" || player?.technique === "spider" || player?.technique === "beast" ? "" : "Cursed Energy", "ce"); // + INOSUKE + JIJI + DAVID + AKIRA
+  ensureResourceBarLabel(playerCeFrame, isLight(player) ? "Information" : player?.technique === "jiji" ? "Rage" : player?.technique === "david" ? "Cyberware Load" : player?.technique === "akira" ? "Work" : player?.technique === "brawler" || player?.technique === "blackleg" || player?.technique === "hivemind" || player?.technique === "zealot" || player?.technique === "spider" || player?.technique === "beast" || player?.technique === "gardener" ? "" : "Cursed Energy", "ce"); // + INOSUKE + JIJI + DAVID + AKIRA
   ensureResourceBarLabel(playerUltFrame, isLight(player) ? "Name" : "Ultimate", "ultimate");
 
   // DUMMY_HUD_NO_WORDS_PATCH:
@@ -7168,7 +7197,7 @@ function updateResourceBarLabels() {
     return;
   }
 
-  ensureResourceBarLabel(enemyCeFrame, isLight(enemy) ? "Information" : enemy?.technique === "jiji" ? "Rage" : enemy?.technique === "david" ? "Cyberware Load" : enemy?.technique === "akira" ? "Work" : enemy?.technique === "brawler" || enemy?.technique === "blackleg" || enemy?.technique === "hivemind" || enemy?.technique === "zealot" || enemy?.technique === "spider" || enemy?.technique === "beast" ? "" : "Cursed Energy", "ce"); // + INOSUKE + JIJI + DAVID + AKIRA
+  ensureResourceBarLabel(enemyCeFrame, isLight(enemy) ? "Information" : enemy?.technique === "jiji" ? "Rage" : enemy?.technique === "david" ? "Cyberware Load" : enemy?.technique === "akira" ? "Work" : enemy?.technique === "brawler" || enemy?.technique === "blackleg" || enemy?.technique === "hivemind" || enemy?.technique === "zealot" || enemy?.technique === "spider" || enemy?.technique === "beast" || enemy?.technique === "gardener" ? "" : "Cursed Energy", "ce"); // + INOSUKE + JIJI + DAVID + AKIRA
   ensureResourceBarLabel(enemyUltFrame, isLight(enemy) ? "Name" : "Ultimate", "ultimate");
 }
 
