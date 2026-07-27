@@ -11668,15 +11668,18 @@ function updateAkiraSystems(f, opponent) {
 // ==========================================================================
 
 const DAVE_PLANT_IDS = ["peashooter", "sunflower", "wallnut", "cherrybomb", "snowpea", "bonkchoy", "potatomine", "chomper"];
+// DAVE_PLANT_BIG_PATCH: sprites draw at DAVE_PLANT_SCALE; the w/h here are
+// the scaled world-space sizes used for hitboxes/blocking.
+const DAVE_PLANT_SCALE = 1.55;
 const DAVE_PLANT_SPECS = {
-  peashooter: { name: "Peashooter", cost: 100, cooldown: 6 * 60,  hp: 90,  life: 30 * 60, w: 34, h: 44 },
-  sunflower:  { name: "Sunflower",  cost: 50,  cooldown: 8 * 60,  hp: 70,  life: 30 * 60, w: 34, h: 46 },
-  wallnut:    { name: "Wall-nut",   cost: 75,  cooldown: 14 * 60, hp: 300, life: 45 * 60, w: 44, h: 52 },
-  cherrybomb: { name: "Cherry Bomb",cost: 150, cooldown: 16 * 60, hp: 60,  life: 4 * 60,  w: 40, h: 40 },
-  snowpea:    { name: "Snow Pea",   cost: 150, cooldown: 10 * 60, hp: 90,  life: 30 * 60, w: 34, h: 44 },
-  bonkchoy:   { name: "Bonk Choy",  cost: 100, cooldown: 9 * 60,  hp: 110, life: 30 * 60, w: 34, h: 46 },
-  potatomine: { name: "Potato Mine",cost: 50,  cooldown: 12 * 60, hp: 70,  life: 40 * 60, w: 34, h: 26 },
-  chomper:    { name: "Chomper",    cost: 150, cooldown: 14 * 60, hp: 120, life: 35 * 60, w: 40, h: 52 }
+  peashooter: { name: "Peashooter", cost: 100, cooldown: 6 * 60,  hp: 90,  life: 30 * 60, w: 52, h: 68 },
+  sunflower:  { name: "Sunflower",  cost: 50,  cooldown: 8 * 60,  hp: 70,  life: 30 * 60, w: 52, h: 71 },
+  wallnut:    { name: "Wall-nut",   cost: 75,  cooldown: 14 * 60, hp: 300, life: 45 * 60, w: 68, h: 80 },
+  cherrybomb: { name: "Cherry Bomb",cost: 150, cooldown: 16 * 60, hp: 60,  life: 4 * 60,  w: 62, h: 62 },
+  snowpea:    { name: "Snow Pea",   cost: 150, cooldown: 10 * 60, hp: 90,  life: 30 * 60, w: 52, h: 68 },
+  bonkchoy:   { name: "Bonk Choy",  cost: 100, cooldown: 9 * 60,  hp: 110, life: 30 * 60, w: 52, h: 71 },
+  potatomine: { name: "Potato Mine",cost: 50,  cooldown: 12 * 60, hp: 70,  life: 40 * 60, w: 52, h: 40 },
+  chomper:    { name: "Chomper",    cost: 150, cooldown: 14 * 60, hp: 120, life: 35 * 60, w: 62, h: 80 }
 };
 const DAVE_PLANT_LIMIT = 4;
 const DAVE_PLANT_LIMIT_ULT = 7;
@@ -11742,7 +11745,7 @@ function getDavePlantSpot(f, aimPoint = null) {
     x = aim.x;
   } else {
     const mine = ownedDavePlants(f);
-    x = f.x + f.w / 2 + f.dir * (100 + (mine.length % 3) * 78);
+    x = f.x + f.w / 2 + f.dir * (110 + (mine.length % 3) * 92);
   }
   return { x: Math.max(60, Math.min(STAGE_W - 60, x)), y: GROUND };
 }
@@ -11766,7 +11769,7 @@ function placeDavePlant(f, plantId, aimPoint = null) {
   const spot = getDavePlantSpot(f, aimPoint);
   // nudge off other plants so they don't stack on one pixel
   for (const p of davePlants) {
-    if (p.hp > 0 && Math.abs(p.x - spot.x) < 34) spot.x += (spot.x >= p.x ? 1 : -1) * 36;
+    if (p.hp > 0 && Math.abs(p.x - spot.x) < 50) spot.x += (spot.x >= p.x ? 1 : -1) * 54;
   }
   spot.x = Math.max(60, Math.min(STAGE_W - 60, spot.x));
   f.ce = Math.max(0, f.ce - getTechniqueCost(f, plantId));
@@ -11785,6 +11788,7 @@ function placeDavePlant(f, plantId, aimPoint = null) {
     foodTicks: 0,
     chewTicks: 0,
     atkTick: 0,
+    spawnTicks: 18, // DAVE_PLANT_ANIM_PATCH: sprout-in pop
     sway: Math.random() * Math.PI * 2
   });
   // planting animation flash on Dave + soil poof on the spot
@@ -11966,6 +11970,8 @@ function updateDavePlants() {
     p.life -= 1;
     if (p.foodTicks > 0) p.foodTicks -= 1;
     if ((p.atkTick || 0) > 0) p.atkTick -= 1;
+    if ((p.spawnTicks || 0) > 0) p.spawnTicks -= 1; // DAVE_PLANT_ANIM_PATCH
+    if ((p.armPop || 0) > 0) p.armPop -= 1;
     if (p.atkCooldown > 0) p.atkCooldown -= 1;
 
     if (p.kind === "peashooter" || p.kind === "snowpea") {
@@ -11993,7 +11999,10 @@ function updateDavePlants() {
       p.fuse -= 1;
       if (p.fuse <= 0) { explodeDavePlant(p, 150, 40); continue; }
     } else if (p.kind === "potatomine") {
-      if (p.armTicks > 0) p.armTicks -= 1;
+      if (p.armTicks > 0) {
+        p.armTicks -= 1;
+        if (p.armTicks === 0) { p.armPop = 14; spawnHitSpark(p.x, p.y - 20, 1, "brown"); } // pops out of the dirt
+      }
       else if (targetable && tc && Math.abs(tc.x - p.x) < 60 && tc.y > GROUND - 130) {
         explodeDavePlant(p, 110, 30);
         continue;
@@ -24125,12 +24134,26 @@ function drawSukunaModelCleanup(f) {
 
 function drawDavePlantSprite(p, ghost = false) {
   const spec = DAVE_PLANT_SPECS[p.kind];
-  const sway = Math.sin(frame * 0.05 + (p.sway || 0)) * 2;
+  // DAVE_PLANT_ANIM_PATCH: shared animation clocks - sway (side to side),
+  // breathe (soft squash/stretch) and the sprout-in pop when planted.
+  const t = frame * 0.05 + (p.sway || 0);
+  const sway = Math.sin(t) * 2.4;
+  const breathe = 1 + Math.sin(t * 1.7) * 0.03;
   const target = p.owner === "player" ? enemy : player;
   const face = p.punchDir || (target ? (Math.sign(target.x + target.w / 2 - p.x) || 1) : 1);
   const recoil = (p.atkTick || 0) > 0 ? 3 : 0;
+  const lw = spec.w / DAVE_PLANT_SCALE;   // local (pre-scale) units
+  const lh = spec.h / DAVE_PLANT_SCALE;
   ctx.save();
   ctx.translate(p.x, p.y);
+  // sprout-in: squash up out of the soil with a small overshoot
+  let pop = 1;
+  const st = p.spawnTicks || 0;
+  if (!ghost && st > 0) {
+    const k = 1 - st / 18;
+    pop = k < 0.7 ? 0.15 + (k / 0.7) * 0.95 : 1.1 - ((k - 0.7) / 0.3) * 0.1;
+  }
+  ctx.scale(DAVE_PLANT_SCALE * (2 - breathe), DAVE_PLANT_SCALE * pop * breathe);
   ctx.lineWidth = 2.4;
   ctx.strokeStyle = "#0b1220";
   const stem = "#2f9e44";
@@ -24142,7 +24165,7 @@ function drawDavePlantSprite(p, ghost = false) {
     ctx.globalAlpha = 0.35 + Math.sin(frame * 0.3) * 0.15;
     ctx.fillStyle = "#84cc16";
     ctx.beginPath();
-    ctx.ellipse(0, -spec.h / 2, spec.w * 0.85, spec.h * 0.75, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -lh / 2, lw * 0.85, lh * 0.75, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -24163,51 +24186,101 @@ function drawDavePlantSprite(p, ghost = false) {
     ctx.fillStyle = stem;
     ctx.fillRect(-3, -26, 6, 24);
     ctx.strokeRect(-3, -26, 6, 24);
-    // head + snout aimed at the target
+    // head bobs on its stem and kicks back when it fires
+    const headBob = Math.sin(t * 1.3) * 1.6;
+    const kick = recoil ? -face * 3 : 0;
+    ctx.save();
+    ctx.translate(sway * 0.6 + kick, -34 + headBob);
     ctx.fillStyle = headCol;
     ctx.beginPath();
-    ctx.arc(sway * 0.6, -34, 12, 0, Math.PI * 2);
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = headCol;
     ctx.beginPath();
-    ctx.roundRect(face > 0 ? 6 - recoil : -22 + recoil, -40, 16, 10, 4);
+    ctx.roundRect(face > 0 ? 6 - recoil : -22 + recoil, -6, 16, 10, 4);
     ctx.fill();
     ctx.stroke();
+    // muzzle puff ring right after a shot
+    if ((p.atkTick || 0) > 4) {
+      ctx.strokeStyle = p.kind === "snowpea" ? "rgba(208, 235, 255, 0.9)" : "rgba(178, 242, 187, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(face * (24 + (8 - p.atkTick) * 2), -1, 3 + (8 - p.atkTick), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#0b1220";
+      ctx.lineWidth = 2.4;
+    }
     if (p.kind === "snowpea") {
-      // ice crystals
+      // ice crystals riding the head
       ctx.fillStyle = "#d0ebff";
       ctx.beginPath();
-      ctx.moveTo(-4, -46); ctx.lineTo(-1, -52); ctx.lineTo(2, -46);
-      ctx.moveTo(4, -44); ctx.lineTo(7, -50); ctx.lineTo(10, -44);
+      ctx.moveTo(-4, -12); ctx.lineTo(-1, -18); ctx.lineTo(2, -12);
+      ctx.moveTo(4, -10); ctx.lineTo(7, -16); ctx.lineTo(10, -10);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+      // cold breath shimmer
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(frame * 0.2) * 0.2;
+      ctx.strokeStyle = "#a5d8ff";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(face * 20, 0, 6 + Math.sin(frame * 0.15) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
+    ctx.restore();
   } else if (p.kind === "sunflower") {
     drawBaseLeaves();
     ctx.strokeStyle = "#0b1220";
     ctx.fillStyle = stem;
     ctx.fillRect(-3, -28, 6, 26);
     ctx.strokeRect(-3, -28, 6, 26);
-    const burst = (p.atkTick || 0) > 0 ? 2 : 0;
+    // petals slowly spin; the whole head sways side to side
+    const burst = (p.atkTick || 0) > 0 ? 3 : 0;
+    const spin = frame * 0.012 + (p.sway || 0);
+    ctx.save();
+    ctx.translate(sway * 0.7, -36 + Math.sin(t * 1.1) * 1.4);
     ctx.fillStyle = "#ffd43b";
     for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2 + sway * 0.03;
+      const a = (i / 8) * Math.PI * 2 + spin;
       ctx.beginPath();
-      ctx.ellipse(Math.cos(a) * (13 + burst) + sway * 0.5, -36 + Math.sin(a) * (13 + burst), 6, 3.4, a, 0, Math.PI * 2);
+      ctx.ellipse(Math.cos(a) * (13 + burst), Math.sin(a) * (13 + burst), 6, 3.4, a, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
     ctx.fillStyle = "#a05a2c";
     ctx.beginPath();
-    ctx.arc(sway * 0.5, -36, 8, 0, Math.PI * 2);
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
+    // a little sun rises out when it pays out
+    if (!ghost && (p.atkTick || 0) > 0) {
+      const rise = (14 - p.atkTick) * 2.2;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.atkTick / 14);
+      ctx.fillStyle = "#ffd43b";
+      ctx.strokeStyle = "#e8a80c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(6, -52 - rise, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      ctx.strokeStyle = "#0b1220";
+    }
   } else if (p.kind === "wallnut") {
+    // idle rock + a rattled wobble right after taking a hit
+    let rock = Math.sin(t * 0.9) * 0.045;
+    if (!ghost && (p.hitCooldown || 0) > 10) rock += Math.sin(frame * 0.9) * 0.12;
+    ctx.save();
+    ctx.translate(0, 0);
+    ctx.rotate(rock);
     ctx.fillStyle = "#d9a066";
     ctx.beginPath();
-    ctx.ellipse(0, -26, 20, 26, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -26, 20, 26 * breathe, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "rgba(120, 72, 32, 0.5)";
@@ -24223,82 +24296,121 @@ function drawDavePlantSprite(p, ghost = false) {
       if (p.hp < p.maxHp * 0.25) { ctx.moveTo(8, -40); ctx.lineTo(4, -28); ctx.lineTo(10, -16); }
       ctx.stroke();
     }
+    ctx.restore();
   } else if (p.kind === "cherrybomb") {
+    // the pair swells as the fuse burns down
+    const fuseT = Math.max(0, Math.min(1, 1 - (p.fuse || 0) / 60));
+    const swell = 1 + fuseT * 0.22 + Math.sin(frame * (0.15 + fuseT * 0.4)) * 0.05 * (0.4 + fuseT);
     const blink = (p.fuse || 0) < 30 && Math.floor(frame / 4) % 2 === 0;
     for (const off of [-9, 9]) {
       ctx.fillStyle = blink ? "#ff8787" : "#e03131";
       ctx.beginPath();
-      ctx.arc(off, -16, 13, 0, Math.PI * 2);
+      ctx.arc(off * swell, -16, 13 * swell, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.strokeStyle = "#2f9e44";
       ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.moveTo(off, -28);
+      ctx.moveTo(off * swell, -28 * swell);
       ctx.quadraticCurveTo(off * 0.3, -40, 0, -42);
       ctx.stroke();
       ctx.strokeStyle = "#0b1220";
       ctx.lineWidth = 2.4;
     }
-    // fuse spark
+    // fuse spark crackles
     ctx.fillStyle = "#ffd43b";
     ctx.beginPath();
-    ctx.arc(0, -44, blink ? 4 : 2.6, 0, Math.PI * 2);
+    ctx.arc(Math.sin(frame * 0.6) * 1.5, -44, blink ? 4.5 : 2.6 + Math.sin(frame * 0.5) * 0.8, 0, Math.PI * 2);
     ctx.fill();
   } else if (p.kind === "potatomine") {
     if ((p.armTicks || 0) > 0) {
-      // buried: dirt mound
+      // buried: a breathing dirt mound with kicked-up crumbs
       ctx.fillStyle = "#7a5230";
       ctx.beginPath();
-      ctx.ellipse(0, -6, 16, 8, 0, Math.PI, 0);
+      ctx.ellipse(0, -6, 16, 8 * breathe, 0, Math.PI, 0);
       ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = "#5d3d22";
+      ctx.beginPath();
+      ctx.arc(-10 + Math.sin(t * 2) * 2, -12, 1.8, 0, Math.PI * 2);
+      ctx.arc(9, -11 + Math.cos(t * 2.3) * 1.5, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     } else {
+      // armed: pops up with an overshoot, light blinking faster over time
+      const ap = p.armPop || 0;
+      const popUp = ap > 0 ? 1 + (ap / 14) * 0.35 : 1;
+      ctx.save();
+      ctx.scale(popUp, popUp);
       ctx.fillStyle = "#d9a066";
       ctx.beginPath();
-      ctx.ellipse(0, -12, 16, 12, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, -12, 16, 12 * breathe, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      // armed light
-      const on = Math.floor(frame / 12) % 2 === 0;
+      const on = Math.floor(frame / 9) % 2 === 0;
       ctx.strokeStyle = "#0b1220";
       ctx.beginPath();
       ctx.moveTo(0, -24); ctx.lineTo(0, -30);
       ctx.stroke();
       ctx.fillStyle = on ? "#ff6b6b" : "#862e2e";
       ctx.beginPath();
-      ctx.arc(0, -33, 4, 0, Math.PI * 2);
+      ctx.arc(0, -33, on ? 4.6 : 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      if (on) {
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = "#ff8787";
+        ctx.beginPath();
+        ctx.arc(0, -33, 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
     }
   } else if (p.kind === "bonkchoy") {
     drawBaseLeaves();
-    // leafy body
+    // body bobs like a boxer waiting for an opening
+    const bob = Math.sin(t * 2.2) * 1.8;
     ctx.fillStyle = "#66a80f";
     ctx.beginPath();
-    ctx.ellipse(sway * 0.4, -24, 13, 20, 0, 0, Math.PI * 2);
+    ctx.ellipse(sway * 0.4, -24 + bob, 13, 20, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#a9e34b";
     ctx.beginPath();
-    ctx.ellipse(sway * 0.4, -20, 8, 13, 0, 0, Math.PI * 2);
+    ctx.ellipse(sway * 0.4, -20 + bob, 8, 13, 0, 0, Math.PI * 2);
     ctx.fill();
-    // two fist stalks; the active one extends on atkTick
+    // two fist stalks: idle bobbing guard, big extension on the punch
     for (const side of [-1, 1]) {
       const punching = (p.atkTick || 0) > 0 && side === face;
-      const reach = punching ? 26 : 10;
+      const guard = Math.sin(t * 2.2 + (side > 0 ? 0 : Math.PI)) * 3;
+      const reach = punching ? 26 + (10 - Math.min(10, p.atkTick)) * 1.2 : 10 + guard;
+      const fistY = -26 + bob + (punching ? 0 : guard * 0.5);
       ctx.strokeStyle = "#0b1220";
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(side * 10, -24);
-      ctx.lineTo(side * (12 + reach * 0.5), -26);
+      ctx.moveTo(side * 10, -24 + bob);
+      ctx.lineTo(side * (12 + reach * 0.5), fistY);
       ctx.stroke();
       ctx.lineWidth = 2.4;
       ctx.fillStyle = "#66a80f";
       ctx.beginPath();
-      ctx.arc(side * (14 + reach), -26, punching ? 7 : 5.6, 0, Math.PI * 2);
+      ctx.arc(side * (14 + reach), fistY, punching ? 7.5 : 5.6, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      // impact flash on the punching fist
+      if (punching && p.atkTick > 5) {
+        ctx.save();
+        ctx.globalAlpha = 0.75;
+        ctx.strokeStyle = "#d8f5a2";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(side * (14 + reach), fistY, 11 + (10 - p.atkTick) * 1.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = "#0b1220";
+        ctx.lineWidth = 2.4;
+      }
     }
   } else if (p.kind === "chomper") {
     drawBaseLeaves();
@@ -24308,59 +24420,74 @@ function drawDavePlantSprite(p, ghost = false) {
     ctx.strokeRect(-3.5, -26, 7, 24);
     const chewing = (p.chewTicks || 0) > 0;
     const open = (p.atkTick || 0) > 0;
+    // idle: the jaw gnashes slowly; chewing: big bulging cheeks
+    const gnash = chewing ? Math.abs(Math.sin(frame * 0.25)) * 5 : (1 + Math.sin(t * 1.6)) * 1.6;
+    const lunge = open ? (14 - Math.min(14, p.atkTick)) * 0.8 : 0;
     ctx.save();
-    ctx.translate(sway * 0.5, -38);
+    ctx.translate(sway * 0.5 + face * lunge, -38 + Math.sin(t * 1.4) * 1.5);
     ctx.scale(face, 1);
     // big purple head
     ctx.fillStyle = "#9c36b5";
     ctx.beginPath();
-    ctx.ellipse(2, chewing ? 2 : 0, 15, chewing ? 15 : 13, 0, 0, Math.PI * 2);
+    ctx.ellipse(2, chewing ? 2 : 0, 15 + (chewing ? gnash * 0.5 : 0), (chewing ? 15 : 13) + (chewing ? gnash * 0.3 : 0), 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    // jaw (opens for the bite)
+    // jaw (swings wide open for the bite, gnashes at idle)
     ctx.fillStyle = "#6741d9";
     ctx.beginPath();
     if (open) {
       ctx.moveTo(0, 2);
-      ctx.lineTo(20, -10);
-      ctx.lineTo(20, 6);
+      ctx.lineTo(22, -12);
+      ctx.lineTo(22, 8);
       ctx.closePath();
     } else {
-      ctx.roundRect(2, 2, 16, 7, 3);
+      ctx.moveTo(2, 2);
+      ctx.lineTo(18, 2 - gnash);
+      ctx.lineTo(18, 9);
+      ctx.lineTo(2, 9);
+      ctx.closePath();
     }
     ctx.fill();
     ctx.stroke();
     // teeth
     ctx.fillStyle = "#f8f9fa";
+    ctx.beginPath();
     if (open) {
-      ctx.beginPath();
-      ctx.moveTo(6, -1); ctx.lineTo(9, 3); ctx.lineTo(12, -2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(5, -2); ctx.lineTo(9, 4); ctx.lineTo(13, -3);
+      ctx.moveTo(14, -4); ctx.lineTo(17, 2); ctx.lineTo(20, -6);
+    } else if (gnash > 1.5) {
+      ctx.moveTo(7, 2); ctx.lineTo(9, 2 - gnash * 0.7); ctx.lineTo(11, 2);
     }
-    // head spikes
+    ctx.closePath();
+    ctx.fill();
+    // head spikes wave
     ctx.fillStyle = "#e64980";
     ctx.beginPath();
-    ctx.moveTo(-8, -11); ctx.lineTo(-5, -18); ctx.lineTo(-2, -11);
-    ctx.moveTo(0, -12); ctx.lineTo(3, -19); ctx.lineTo(6, -12);
+    ctx.moveTo(-8, -11); ctx.lineTo(-5 + Math.sin(t * 1.9) * 1.2, -19); ctx.lineTo(-2, -11);
+    ctx.moveTo(0, -12); ctx.lineTo(3 + Math.sin(t * 1.9 + 1) * 1.2, -20); ctx.lineTo(6, -12);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
 
-  // small HP bar once damaged
+  ctx.restore();
+
+  // HP bar once damaged - drawn outside the sprite scale so it stays a
+  // consistent size no matter how big the plant is.
   if (!ghost && p.hp < p.maxHp) {
     const ratio = Math.max(0, p.hp / p.maxHp);
+    ctx.save();
+    ctx.translate(p.x, p.y - spec.h - 12);
     ctx.fillStyle = "rgba(2, 6, 23, 0.65)";
-    ctx.fillRect(-16, -spec.h - 12, 32, 5);
+    ctx.fillRect(-18, 0, 36, 6);
     ctx.fillStyle = ratio > 0.5 ? "#51cf66" : ratio > 0.25 ? "#fcc419" : "#fa5252";
-    ctx.fillRect(-16, -spec.h - 12, 32 * ratio, 5);
+    ctx.fillRect(-18, 0, 36 * ratio, 6);
     ctx.strokeStyle = "#0b1220";
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(-16, -spec.h - 12, 32, 5);
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(-18, 0, 36, 6);
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 function drawDavePlants() {
