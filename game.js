@@ -4067,6 +4067,9 @@ function makeFighter(config) {
     practiceIdleTicks: PRACTICE_BOT_RETURN_TICKS,
     practiceHomeX: config.x,
     walkCycle: 0,
+    castPoseMove: null,
+    castPoseTicks: 0,
+    castPoseAngle: 0,
 
     informationMeter: 0,
     identityProgress: 0,
@@ -5970,7 +5973,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
     "barrageTimer", "barrageDuration", "barrageHitsDone", "barrageDamageRemaining", "barrageKnockback", "barrageDir", "barrageTarget", "barrageLockX", "barrageLockY",
     "grabThrowTimer", "grabThrowDuration", "grabThrowDir", "grabThrowTarget", "grabThrowAim", "grabThrowLockX", "grabThrowLockY",
     "bluePunchHoldTicks", "bluePunchActiveTicks", "bluePunchCooldown", "bluePunchChases", "bluePunchFlash",
-    "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimPoint",
+    "castPoseMove", "castPoseTicks", "castPoseAngle", "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimPoint",
     "ce", "maxCe", "ultimateMeter", "domainStartup", "domainAttemptType", "simpleDomainTicks", "simpleDomainFlash", "simpleDomainCooldown",
     "bindingVowType", "bindingVowTicks", "bindingVowCooldown", "bindingVowChoiceTicks", "bindingVowQuote", "bindingVowQuoteTicks", "bindingVowFlash", "sukunaThrowComboCooldown",
     "informationMeter", "identityProgress", "lightSummonStage", "lightSummonType", "lightSummonHealth", "lightSummonMaxHealth", "lightSummonTicks", "lightSummonHitFlash", "lightSummonAnchorX", "lightSummonAnchorY", "lightSummonAnchorDir", "potatoCooldown", "potatoFocusTicks", "potatoVulnerableTicks", "potatoEatingTicks", "deathNoteCastId", "ultimateStartup", "ultimateRecovery", "ultimateMove", "ultimateHasReleased", "lightSummonFallVy", "lightRyukCooldown", "lightRyukCooldownMax", "lightInvestigationCooldown", "lightInvestigationCooldownMax", "eyeDealUsed", "eyeDealGlowTicks", "deathNoteSlowTicks", "deathNoteFearTicks", "ctLockTimer",
@@ -6548,6 +6551,9 @@ function getFighterNetworkState(f) {
     deathNoteFearTicks: f.deathNoteFearTicks,
     ctLockTimer: f.ctLockTimer,
     walkCycle: f.walkCycle,
+    castPoseMove: f.castPoseMove,
+    castPoseTicks: f.castPoseTicks,
+    castPoseAngle: f.castPoseAngle,
     onPlatform: f.onPlatform
   };
 }
@@ -12413,6 +12419,7 @@ function performTeleport(f, aimPoint = null) {
   f.vy = 0;
   f.ce = Math.max(0, f.ce - teleportCost);
   f.teleportCooldown = GOJO_TELEPORT_COOLDOWN_TICKS;
+  beginCastMotion(f, "teleport");
   f.techniqueAim = null;
   spawnTeleportEffect(start, { x: f.x + f.w / 2, y: f.y + f.h / 2 }, f.dir);
   spawnHitSpark(start.x, start.y, f.dir, "blue");
@@ -12606,6 +12613,7 @@ function startTechnique(f, slot, chargeRatio = 0, aimPoint = null, releasingChar
   const damageScale = (chargedLimitless ? 1 + finalCharge * (move === "red" ? 1.45 : 1.25) : 1) * (voidBoost ? 1.28 : shrineBoost ? 1.12 : 1) * bindingDamageBoost;
   const knockbackScale = (chargedLimitless ? 1 + finalCharge * (move === "red" ? 1.25 : 1.08) : 1) * (move === "red" ? 1.28 : move === "blue" ? 1.32 : 1) * (voidBoost && move === "blue" ? 1.9 : voidBoost ? 1.32 : shrineBoost ? 1.16 : 1);
   playTechniqueShootSfx(f, move);
+  beginCastMotion(f, move, aimVector.angle);
 
   projectiles.push({
     owner: f === player ? "player" : "enemy",
@@ -12679,6 +12687,7 @@ function startFuga(f, aimPoint = null) {
   f.vx *= 0.35;
 
   const previewDistance = getAimPreviewDistance(move, spec, 0, aimVector, f, spec.radius);
+  beginCastMotion(f, move, aimVector.angle);
   const spawnDistance = Math.min(48, Math.max(0, previewDistance - 8));
   const travelDistance = Math.max(0, previewDistance - spawnDistance);
   projectiles.push({
@@ -13360,6 +13369,7 @@ function releaseUltimate(f) {
 function releaseHollowPurple(f) {
   const center = getFighterCenter(f);
   const aimVector = getTechniqueAimVector(f, "blue", f.ultimateAimPoint || f.techniqueAim);
+  beginCastMotion(f, "purple", aimVector.angle);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
   const speed = 13.4;
   const radius = 52;
@@ -13400,6 +13410,7 @@ function releaseHollowPurple(f) {
 function releaseWorldCuttingSlash(f) {
   const center = getFighterCenter(f);
   const aimVector = getTechniqueAimVector(f, "slash", f.ultimateAimPoint || f.techniqueAim);
+  beginCastMotion(f, "worldSlash", aimVector.angle);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
   const speed = 15.8;
   const radius = 50;
@@ -16842,9 +16853,7 @@ function updateFighter(f, opponent) {
   // WALK_CYCLE_ALL_PATCH: every fighter advances the continuous walk cycle
   // (it used to be shrine-only, leaving the others on a snappy 8-frame gait).
   if (f.grounded && Math.abs(f.vx) > 0.3 && !f.attacking && !f.blocking && f.stun <= 0 && f.dodging <= 0) {
-    f.walkCycle = ((f.walkCycle || 0) + Math.abs(f.vx) * 0.065) % (Math.PI * 2);
-  } else if (f.grounded && !f.attacking && !f.blocking) {
-    f.walkCycle = 0;
+    f.walkCycle = ((f.walkCycle || 0) + Math.abs(f.vx) * 0.095) % (Math.PI * 2);
   }
   updateWalkingSfx(f);
   f.vx *= f.grounded ? 0.86 : 0.97;
@@ -19674,49 +19683,7 @@ function drawUltimateAimPreview(f) {
 }
 
 function drawTeleportEffects() {
-  for (const effect of teleportEffects) {
-    const t = effect.life / effect.maxLife;
-    const age = 1 - t;
-    ctx.save();
-    ctx.globalAlpha = t;
-
-    const beam = ctx.createLinearGradient(effect.startX, effect.startY, effect.endX, effect.endY);
-    beam.addColorStop(0, `rgba(224, 242, 254, ${0.9 * t})`);
-    beam.addColorStop(0.5, `rgba(56, 189, 248, ${0.75 * t})`);
-    beam.addColorStop(1, `rgba(37, 99, 235, ${0.95 * t})`);
-    ctx.strokeStyle = beam;
-    ctx.lineCap = "round";
-    ctx.lineWidth = 14 * t + 2;
-    ctx.beginPath();
-    ctx.moveTo(effect.startX, effect.startY);
-    ctx.lineTo(effect.endX, effect.endY);
-    ctx.stroke();
-
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * t})`;
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([18 * t + 4, 10]);
-    ctx.beginPath();
-    ctx.moveTo(effect.startX, effect.startY);
-    ctx.lineTo(effect.endX, effect.endY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    for (const point of [{ x: effect.startX, y: effect.startY }, { x: effect.endX, y: effect.endY }]) {
-      const ring = 18 + age * 34;
-      ctx.strokeStyle = `rgba(125, 211, 252, ${0.9 * t})`;
-      ctx.lineWidth = 4 * t + 1;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, ring, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = `rgba(224, 242, 254, ${0.16 * t})`;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, ring * 0.72, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
+  for (const effect of teleportEffects) drawTeleportMotion(effect);
 }
 
 function drawSukunaKingPassiveEffect(f) {
@@ -19771,64 +19738,6 @@ function drawSukunaKingPassiveEffect(f) {
   ctx.restore();
 }
 
-function drawGojoBluePunchEffect(f) {
-  if (!f || f.technique !== "limitless") return;
-  const active = isBluePunchActive(f);
-  const chargeRatio = Math.max(0, Math.min(1, (f.bluePunchHoldTicks || 0) / GOJO_BLUE_PUNCH_HOLD_TICKS));
-  const flash = Math.max(0, Math.min(1, (f.bluePunchFlash || 0) / 18));
-  if (!active && chargeRatio <= 0 && flash <= 0) return;
-
-  const center = getFighterCenter(f);
-  const activeRatio = Math.max(0, Math.min(1, (f.bluePunchActiveTicks || 0) / GOJO_BLUE_PUNCH_ACTIVE_TICKS));
-  const pulse = 1 + Math.sin(frame * 0.26) * 0.08;
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  if (active) {
-    const alpha = 0.25 + activeRatio * 0.38 + flash * 0.22;
-    ctx.strokeStyle = `rgba(125, 211, 252, ${alpha})`;
-    ctx.lineWidth = 4 + flash * 3;
-    ctx.setLineDash([18, 10]);
-    ctx.lineDashOffset = -frame * 1.2;
-    ctx.beginPath();
-    ctx.ellipse(center.x, center.y + 4, 48 * pulse, 72 * pulse, 0, -0.25, Math.PI * 1.25);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    for (const side of [-1, 1]) {
-      const fistX = center.x + side * (f.w * 0.42 + 9);
-      const fistY = f.y + 73 + Math.sin(frame * 0.18 + side) * 3;
-      const pullOffset = Math.sin(frame * 0.3 + side) * 6;
-      ctx.strokeStyle = `rgba(56, 189, 248, ${0.42 + flash * 0.3})`;
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.arc(fistX, fistY, 10 + pulse * 3, frame * 0.12, frame * 0.12 + Math.PI * 1.45);
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(224, 242, 254, ${0.34 + flash * 0.28})`;
-      ctx.beginPath();
-      ctx.moveTo(fistX + side * (24 + pullOffset), fistY - 8);
-      ctx.quadraticCurveTo(fistX + side * 8, fistY - 2, fistX, fistY);
-      ctx.moveTo(fistX + side * (22 - pullOffset * 0.5), fistY + 9);
-      ctx.quadraticCurveTo(fistX + side * 7, fistY + 3, fistX - side * 1, fistY);
-      ctx.stroke();
-    }
-  }
-
-  if (chargeRatio > 0 && !active) {
-    ctx.strokeStyle = `rgba(224, 242, 254, ${0.35 + chargeRatio * 0.45})`;
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y - 4, 34 + chargeRatio * 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * chargeRatio);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(56, 189, 248, ${0.08 + chargeRatio * 0.13})`;
-    ctx.beginPath();
-    ctx.ellipse(center.x, center.y + 8, 32 + chargeRatio * 20, 54 + chargeRatio * 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 function drawGojoPushPullEffect(f) {
   if (!f || (f.gojoPushPullTimer || 0) <= 0) return;
   const center = getFighterCenter(f);
@@ -19870,50 +19779,6 @@ function drawGojoPushPullEffect(f) {
   ctx.beginPath();
   ctx.arc(center.x + jitter * 0.6, center.y - 4, 4 + timerRatio * 4, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
-}
-
-function drawSukunaFugaChargeEffect(f) {
-  if (!f || f.technique !== "shrine" || !f.fugaAiming) return;
-  const center = getFighterCenter(f);
-  const chargeRatio = Math.max(0, Math.min(1, (f.fugaChargeTicks || 0) / getFugaRequiredChargeTicks(f)));
-  const pulse = 1 + Math.sin(frame * 0.28) * (0.05 + chargeRatio * 0.05);
-  const radius = 28 + chargeRatio * 34;
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = chargeRatio >= 1
-    ? "rgba(254, 240, 138, 0.92)"
-    : `rgba(251, 146, 60, ${0.35 + chargeRatio * 0.36})`;
-  ctx.lineWidth = 4 + chargeRatio * 4;
-  ctx.setLineDash(chargeRatio >= 1 ? [] : [14, 10]);
-  ctx.lineDashOffset = -frame * (0.8 + chargeRatio * 0.6);
-  ctx.beginPath();
-  ctx.arc(center.x, center.y - 6, radius * pulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.06, chargeRatio));
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  const glow = ctx.createRadialGradient(center.x, center.y - 4, 2, center.x, center.y - 4, 78 * pulse);
-  glow.addColorStop(0, `rgba(254, 240, 138, ${0.18 + chargeRatio * 0.24})`);
-  glow.addColorStop(0.48, `rgba(249, 115, 22, ${0.12 + chargeRatio * 0.2})`);
-  glow.addColorStop(1, "rgba(127, 29, 29, 0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y - 4, 78 * pulse, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = `rgba(127, 29, 29, ${0.42 + chargeRatio * 0.38})`;
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  for (let i = 0; i < 5; i += 1) {
-    const angle = frame * 0.05 + i * Math.PI * 0.4;
-    const inner = radius * (0.45 + chargeRatio * 0.25);
-    const outer = radius * (0.95 + chargeRatio * 0.55);
-    ctx.beginPath();
-    ctx.moveTo(center.x + Math.cos(angle) * inner, center.y - 6 + Math.sin(angle) * inner);
-    ctx.lineTo(center.x + Math.cos(angle + 0.28) * outer, center.y - 6 + Math.sin(angle + 0.28) * outer);
-    ctx.stroke();
-  }
   ctx.restore();
 }
 
@@ -21089,6 +20954,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.restore();
     return;
   }
+  const motion = getFighterMotion(f);
+  const punchMotion = !isLight(f) && !isSanji(f) && !isZealot(f) ? getPunchMotion(f) : null;
   const flash = f.hurt > 0 && Math.floor(frame / 3) % 2 === 0;
   const dodgeAlpha = f.dodging > 0 ? 0.48 : 1;
   const running = !f.ko && f.grounded && Math.abs(f.vx) > 0.65 && !f.blocking && f.stun <= 0 && f.dodging <= 0;
@@ -21114,7 +20981,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   const armSwing = walkStride;
   const runPose = walkStride;
   const runCenterLift = running ? Math.abs(Math.sin(gaitPhase)) * (backpedal ? 2.2 : 3) : 0;
-  const bob = running ? (backpedal ? 0.8 : 1) + runCenterLift * 0.45 : 0;
+  const bob = motion.bob;
   const jumpPose = !f.grounded && !f.ko;
   const jumpRetreating = jumpPose && Math.sign(f.vx) === -f.dir;
   const jumpCycle = jumpPose ? Math.sin(frame * 0.32) : 0;
@@ -21130,9 +20997,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   drawLightSummonEffect(f);
   drawBindingVowEffect(f);
   drawSimpleDomainEffect(f);
-  drawGojoBluePunchEffect(f);
+  // Blue-infused energy is rendered on the actual arm-rig hands below.
   drawGojoPushPullEffect(f);
-  drawSukunaFugaChargeEffect(f);
+  // Fuga charge is drawn as an attached bow by the cast arm rig.
   drawThraggFlightEffect(f);
   ctx.save();
   ctx.globalAlpha = dodgeAlpha;
@@ -21145,7 +21012,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   // DAVID_PATCH: the Cyber Skeleton makes him tower - scaled about his feet.
   const davidMech = davidUltActive(f) && !f.ko && !f.lying;
   const bulkX = f.technique === "brawler" ? 1.16 : davidMech ? 1.22 : 1;
-  const bulkY = f.technique === "brawler" ? 1.1 : davidMech ? 1.5 : 1;
+  const bulkY = (f.technique === "brawler" ? 1.1 : davidMech ? 1.5 : 1) * (1 - motion.squash);
   // ZEALOT_WHIRL_SPIN_PATCH v2: real full-body spin. Two effects layer:
   //   - horizontal scale sweeps through zero (edge-on flip) so the sprite
   //     reads as rotating about its vertical axis (a 2D pirouette trick).
@@ -21180,79 +21047,13 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   if (davidUltActive(f) && !f.ko && !f.lying) drawDavidCyberSkeleton(f);
 
   const hipY = 74;
-  const kneeY = jumpPose ? 104 : 101;
+  const kneeY = 101;
   const footY = 124;
-  const leftHip = { x: 18, y: hipY };
-  const rightHip = { x: 34, y: hipY };
+  const leftHip = { x: 18, y: hipY }, rightHip = { x: 34, y: hipY };
   const risingJump = jumpPose && f.vy < -0.3;
   const fallingJump = jumpPose && !risingJump;
-  const leftKnee = jumpPose
-    ? { x: fallingJump ? 20 : 21, y: fallingJump ? 96 : 95 }
-    : { x: 16, y: kneeY };
-  const rightKnee = risingJump
-    ? { x: 61, y: 77 }
-    : jumpPose
-      ? { x: 60, y: 79 }
-      : { x: 36, y: kneeY };
-  const leftFoot = jumpPose
-    ? { x: fallingJump ? -10 : -11, y: fallingJump ? 98 : 96 }
-    : { x: 14, y: footY };
-  const rightFoot = risingJump
-    ? { x: 61, y: 114 }
-    : jumpPose
-      ? { x: 60, y: 115 }
-      : { x: 39, y: footY };
-  if (running && !jumpPose) {
-    const swingWave = Math.sin(gaitPhase);
-    let strideCurve, strideLen, leftLift, rightLift, kneeBend, kneeYDrop, kneeXBias, kneeLiftPull;
-    if (backpedal) {
-      // BACKPEDAL_GAIT_PATCH: a distinct backward-walk, not the forward
-      // cycle scaled down. Short choppy steps (eased stride curve so the
-      // foot plants quickly and dwells), knees carried higher and bent
-      // harder (the cautious can't-see-where-I'm-stepping gait), and the
-      // swing foot travels toward -x, the direction of travel - so the
-      // lift phase here is the mirror of the forward path's.
-      strideCurve = Math.sign(walkStride) * Math.pow(Math.abs(walkStride), 0.72);
-      strideLen = 5.5;
-      leftLift = Math.max(0, swingWave) * 4.4;
-      rightLift = Math.max(0, -swingWave) * 4.4;
-      kneeBend = 6.6 + Math.abs(swingWave) * 2.2;
-      kneeYDrop = 6.2;
-      kneeXBias = -1.6;
-      kneeLiftPull = 0.55;
-    } else {
-      // Forward walk. The lifted (swing) foot must be the one traveling
-      // toward +x relative to the body while the planted foot slides back.
-      // NO_LEG_CROSS_PATCH: stride stays under 8 (half the 16px hip gap)
-      // so the rear leg never overtakes the front leg - crossing made the
-      // flat 2D legs visually swap and the arm pairing read wrong.
-      strideCurve = Math.max(-1, Math.min(1, walkStride));
-      strideLen = gojoWalk ? 7 : 7.5;
-      leftLift = Math.max(0, -swingWave) * 2.6;
-      rightLift = Math.max(0, swingWave) * 2.6;
-      kneeBend = 4.4 + Math.abs(swingWave) * 1.1;
-      kneeYDrop = 8.5;
-      kneeXBias = 0;
-      kneeLiftPull = 0.25;
-    }
-    leftFoot.x = 18 - strideCurve * strideLen;
-    rightFoot.x = 34 + strideCurve * strideLen;
-    leftFoot.y = footY - leftLift;
-    rightFoot.y = footY - rightLift;
-
-    const leftKneeDir = leftFoot.x >= leftHip.x ? 1 : -1;
-    const rightKneeDir = rightFoot.x >= rightHip.x ? 1 : -1;
-    leftKnee.x = Math.max(
-      Math.min(leftHip.x, leftFoot.x) - 5,
-      Math.min(Math.max(leftHip.x, leftFoot.x) + 5, (leftHip.x + leftFoot.x) * 0.5 + leftKneeDir * kneeBend + kneeXBias)
-    );
-    rightKnee.x = Math.max(
-      Math.min(rightHip.x, rightFoot.x) - 5,
-      Math.min(Math.max(rightHip.x, rightFoot.x) + 5, (rightHip.x + rightFoot.x) * 0.5 + rightKneeDir * kneeBend + kneeXBias)
-    );
-    leftKnee.y = (leftHip.y + leftFoot.y) * 0.5 + kneeYDrop - leftLift * kneeLiftPull;
-    rightKnee.y = (rightHip.y + rightFoot.y) * 0.5 + kneeYDrop - rightLift * kneeLiftPull;
-  }
+  const leftKnee = { ...motion.leftKnee }, rightKnee = { ...motion.rightKnee };
+  const leftFoot = { ...motion.leftFoot }, rightFoot = { ...motion.rightFoot };
   if ((f.thraggFlightTicks || 0) > 0 && jumpPose) {
     // THRAGG_FLIGHT_POSE_PATCH: superman carriage - both legs sweep back
     // and trail behind him instead of the generic jump tuck.
@@ -21369,6 +21170,10 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   // toward +x, the facing direction) instead of a flat line the leg
   // could poke through.
   const drawBoot = (foot) => {
+    ctx.save();
+    ctx.translate(foot.x, foot.y - 6);
+    ctx.rotate(foot.roll || 0);
+    ctx.translate(-foot.x, -foot.y + 6);
     ctx.fillStyle = "#020617";
     ctx.beginPath();
     ctx.roundRect(foot.x - 10, foot.y - 9, 24, 13, 5);
@@ -21377,6 +21182,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.beginPath();
     ctx.roundRect(foot.x - 7.5, foot.y - 6.5, 19, 8.5, 3.5);
     ctx.fill();
+    ctx.restore();
   };
   drawBoot(leftFoot);
   drawBoot(rightFoot);
@@ -21410,12 +21216,11 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     }
   }
 
-  // BACKPEDAL torso: shifted and rotated slightly BACK (positive), the
-  // opposite of the forward walk's forward lean.
-  const lean = f.attacking && !isLight(f) ? -7 : f.blocking ? 4 : jumpRetreating ? 4 : jumpPose ? -2 : backpedal ? 4.5 : gojoWalk ? -3 + runPose * 0.4 : running ? -5 : f.technique === "shrine" ? -4 : -2;
+  const lean = punchMotion ? punchMotion.drive * 3 - punchMotion.load * 2 : f.blocking ? -2 : 0;
   ctx.save();
-  ctx.translate(lean, 0);
-  ctx.rotate((f.technique === "shrine" ? -0.04 : -0.025) + idle * 0.01 + (backpedal ? 0.06 : 0));
+  ctx.translate(26 + lean, 74);
+  ctx.rotate(motion.tilt + (punchMotion?.tilt || 0) + idle * 0.008);
+  ctx.translate(-26, -74);
 
   ctx.fillStyle = "#020617";
   ctx.beginPath();
@@ -23167,6 +22972,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.beginPath();
     ctx.ellipse(hand.x - 1, hand.y - 1, 4.8, 3.8, 0, 0, Math.PI * 2);
     ctx.fill();
+    drawGojoHandEnergy(f, hand);
     if (isShrineArm) {
       ctx.strokeStyle = "rgba(127, 29, 29, 0.55)";
       ctx.lineWidth = 1.3;
@@ -23181,7 +22987,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     drawArmRig({ x: 41, y: 48 }, { x: 54, y: 49 }, { x: 57, y: 61 });
     drawArmRig({ x: 12, y: 50 }, { x: 23, y: 58 }, { x: 30, y: 52 });
   }
-  if (f.technique === "shrine" && !shibuyaSleeve && !f.attacking && !jumpPose && !f.blocking) {
+  if (f.technique === "shrine" && !shibuyaSleeve && !f.attacking && !jumpPose && !f.blocking && motion.blend < 0.02 && !getSorcererCast(f)) {
     const lowerBreath = running ? runCenterLift * 0.12 : idle * 2;
     const lowerSwing = running ? armSwing * (backpedal ? 1.1 : 8) : idle * 1.2; // EQUAL_ARM_PATCH: same backpedal sway as the upper pair
     drawArmRig(
@@ -23197,7 +23003,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       skinColor
     );
   }
-  if (isLight(f) && (f.attacking || f.potatoEatingTicks > 0 || f.ultimateMove === "deathNote")) {
+  if (drawSorcererCastArms(f, drawArmRig, skin)) {
+    // Cast poses own the arms through charging and follow-through.
+  } else if (isLight(f) && (f.attacking || f.potatoEatingTicks > 0 || f.ultimateMove === "deathNote")) {
     drawLightHandAction(f, drawArmRig, skin);
   } else if (f.attacking && isSanji(f) && f.attacking !== "backThrow") {
     // SANJI_PATCH: he never punches - while kicking, both hands stay up
@@ -23343,26 +23151,16 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
         heavy ? { x: 84, y: 82 } : { x: 74, y: 74 },   // active: blade past the hip
         heavy ? { x: 58, y: 74 } : { x: 56, y: 70 }    // recovery
       );
+    } else if (punchMotion) {
+      shoulder = punchMotion.shoulder;
+      elbow = punchMotion.elbow;
+      fist = punchMotion.fist;
     } else {
-      shoulder = blendPose(
-        { x: 42, y: 52 },
-        { x: 41, y: heavy ? 50 : 57 },
-        { x: 41, y: heavy ? 50 : 57 },
-        { x: 41, y: heavy ? 50 : 57 }
-      );
-      elbow = blendPose(
-        { x: 48, y: 68 },
-        heavy ? { x: 47, y: 34 } : { x: 50, y: 52 },
-        heavy ? { x: 57, y: 44 } : { x: 58, y: 56 },
-        heavy ? { x: 51, y: 60 } : { x: 52, y: 62 }
-      );
-      fist = blendPose(
-        { x: 43, y: 82 },
-        heavy ? { x: 37, y: 27 } : { x: 45, y: 44 },
-        heavy ? { x: 76, y: 47 } : { x: 66, y: 56 },
-        heavy ? { x: 60, y: 66 } : { x: 58, y: 64 }
-      );
+      shoulder = { x: 42, y: 52 };
+      elbow = { x: 54, y: 58 };
+      fist = { x: 65, y: 57 };
     }
+
     drawArmRig(shoulder, elbow, fist);
     // ZEALOT_SWORD_PATCH: bright afterimage arc while the blade is mid-swing
     if (isZealot(f) && active) {
@@ -23404,8 +23202,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 },
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 }
     );
-    drawArmRig(guardShoulder, guardElbow, guardFist);
-    if (f.technique === "shrine") {
+    if (punchMotion) drawArmRig({x:11,y:52},{x:17,y:65},punchMotion.guard);
+    else drawArmRig(guardShoulder, guardElbow, guardFist);
+    if (f.technique === "shrine" && !shibuyaSleeve) {
       const extraLift = blendValue(0, heavy ? -2 : -1, 1, 0);
       const extraReach = blendValue(0, -2, 4, 1);
       drawArmRig(
@@ -23465,49 +23264,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       { x: 2, y: 62 },
       { x: -8, y: 72 - jumpCycle }
     );
-  } else if (jumpPose) {
-    if (f.technique === "shrine") {
-      const airSwing = jumpCycle * 2;
-      drawArmRig(
-        { x: 44, y: 48 },
-        { x: 55 + airSwing * 0.2, y: 55 },
-        { x: 61 + airSwing, y: 64 },
-        skinColor
-      );
-      drawArmRig(
-        { x: 9, y: 49 },
-        { x: -2 - airSwing * 0.2, y: 56 },
-        { x: -8 - airSwing, y: 65 },
-        skinColor
-      );
-      if (!shibuyaSleeve) {
-      drawArmRig(
-        { x: 43, y: 63 },
-        { x: 50 - airSwing * 0.25, y: 75 },
-        { x: 44 - airSwing, y: 87 },
-        skinColor
-      );
-      drawArmRig(
-        { x: 10, y: 64 },
-        { x: 3 + airSwing * 0.25, y: 76 },
-        { x: 9 + airSwing, y: 88 },
-        skinColor
-      );
-      }
-    } else if (jumpRetreating) {
-      const armWave = jumpCycle * 2;
-      drawArmRig({ x: 41, y: 48 }, { x: 56, y: 50 + armWave }, { x: 69, y: 46 + armWave });
-      drawArmRig({ x: 12, y: 49 }, { x: -2, y: 56 - armWave }, { x: -16, y: 58 - armWave });
-    } else {
-      if (f.vy > 0.4) {
-        drawArmRig({ x: 41, y: 49 }, { x: 58, y: 39 }, { x: 78, y: 53 + jumpCycle * 2 });
-        drawArmRig({ x: 12, y: 49 }, { x: -5, y: 39 }, { x: -26, y: 53 - jumpCycle * 2 });
-      } else {
-        const armWave = jumpCycle * 3;
-        drawArmRig({ x: 41, y: 47 }, { x: 59, y: 45 }, { x: 68, y: 33 + armWave });
-        drawArmRig({ x: 12, y: 48 }, { x: -6, y: 50 }, { x: -15, y: 64 - armWave });
-      }
-    }
+  } else if (jumpPose || motion.blend >= 0.02) {
+    drawMovingArms(f, drawArmRig, skin, motion);
   } else if (f.thraggGrabState && f.thraggGrabState !== "idle") {
     if (f.thraggGrabState === "slam") {
       // GRAB_SLAM_ANIM_PATCH: arms track the throw - hoisted straight up
@@ -26008,16 +25766,7 @@ function drawTechniqueAimPreview(f) {
   const radiusScale = f.technique === "limitless" ? 1 + chargeRatio * (move === "red" ? 0.95 : 0.85) : 1;
   const radius = move === "ryukStrike" ? 18 + Math.round(getLightInfoRatio(f) * 6) : spec.radius * radiusScale;
 
-  if (move === "blue" || move === "red") {
-    const chargeDistance = 38 + chargeRatio * 12;
-    ctx.save();
-    ctx.translate(
-      aimVector.origin.x + aimVector.x * chargeDistance,
-      aimVector.origin.y + aimVector.y * chargeDistance
-    );
-    drawLimitlessOrb(move, radius, aimVector.dir);
-    ctx.restore();
-  }
+  // Charging energy is attached to the arm rig; only the endpoint is previewed here.
 
   if (showOnlyChargeOrb) return;
 
@@ -26164,331 +25913,10 @@ function drawProjectiles() {
     drawProjectileTrail(p);
     const projectileAngle = Number(p.angle);
     const hasProjectileAngle = Number.isFinite(projectileAngle);
-    if (p.move === "purple") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const pulse = 1 + Math.sin(frame * 0.22) * 0.05;
-      ctx.globalCompositeOperation = "lighter";
-      const glow = ctx.createRadialGradient(0, 0, p.radius * 0.12, 0, 0, p.radius * 2.35 * pulse);
-      glow.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      glow.addColorStop(0.18, "rgba(216, 180, 254, 0.95)");
-      glow.addColorStop(0.46, "rgba(124, 58, 237, 0.84)");
-      glow.addColorStop(0.82, "rgba(37, 99, 235, 0.38)");
-      glow.addColorStop(1, "rgba(2, 6, 23, 0)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 2.18 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.52, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(109, 40, 217, 0.96)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.84, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(224, 242, 254, 0.9)";
-      ctx.beginPath();
-      ctx.arc(p.radius * 0.18, -p.radius * 0.18, p.radius * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(248, 113, 113, 0.88)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.06, frame * 0.19, frame * 0.19 + Math.PI * 1.35);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(56, 189, 248, 0.88)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.34, -frame * 0.14, -frame * 0.14 + Math.PI * 1.25);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(216, 180, 254, 0.62)";
-      ctx.lineWidth = 9;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 3.4, 0);
-      ctx.lineTo(-p.radius * 1.1, 0);
-      ctx.stroke();
-      ctx.globalCompositeOperation = "source-over";
-    } else if (p.move === "worldSlash") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-
-      // PURPLE_WCS_BUFF_PATCH
-      // World Cutting Slash: a wide white space wound with a black void core
-      // and red cursed-energy fractures.
-      const pulse = 1 + Math.sin(frame * 0.32) * 0.055;
-      const slashLength = p.radius * 4.8;
-      const slashHeight = p.radius * 0.82 * pulse;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.9;
-
-      // red cursed glow behind the cut
-      ctx.strokeStyle = "rgba(239, 68, 68, 0.36)";
-      ctx.lineWidth = p.radius * 0.82;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.72, slashHeight * 0.28);
-      ctx.bezierCurveTo(-slashLength * 0.25, -slashHeight * 0.8, slashLength * 0.25, slashHeight * 0.72, slashLength * 0.82, -slashHeight * 0.2);
-      ctx.stroke();
-
-      // bright white outer tear
-      ctx.strokeStyle = "rgba(255,255,255,0.98)";
-      ctx.lineWidth = p.radius * 0.38;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.85, slashHeight * 0.18);
-      ctx.bezierCurveTo(-slashLength * 0.28, -slashHeight * 0.52, slashLength * 0.25, slashHeight * 0.5, slashLength * 0.92, -slashHeight * 0.12);
-      ctx.stroke();
-
-      // black void core
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "rgba(0,0,0,0.96)";
-      ctx.lineWidth = p.radius * 0.24;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.8, slashHeight * 0.17);
-      ctx.bezierCurveTo(-slashLength * 0.25, -slashHeight * 0.42, slashLength * 0.22, slashHeight * 0.38, slashLength * 0.84, -slashHeight * 0.1);
-      ctx.stroke();
-
-      // razor center line
-      ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = "rgba(255,255,255,0.92)";
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.95, slashHeight * 0.06);
-      ctx.lineTo(slashLength * 0.95, -slashHeight * 0.04);
-      ctx.stroke();
-
-      // parallel fracture lines
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 4; i += 1) {
-        const off = (i - 1.5) * p.radius * 0.22;
-        ctx.beginPath();
-        ctx.moveTo(-slashLength * (0.55 + i * 0.05), off + slashHeight * 0.34);
-        ctx.lineTo(slashLength * (0.45 + i * 0.08), off - slashHeight * 0.28);
-        ctx.stroke();
-      }
-
-      // dark trailing tears
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 1.05, slashHeight * 0.34);
-      ctx.lineTo(-slashLength * 0.5, slashHeight * 0.22);
-      ctx.moveTo(-slashLength * 0.9, -slashHeight * 0.24);
-      ctx.lineTo(-slashLength * 0.38, -slashHeight * 0.16);
-      ctx.stroke();
-
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
+    if (drawSorcererProjectile(p)) {
+      // Sorcerer projectile art stays aligned with its existing collision shape.
     } else if (p.move === "ryukStrike") {
       drawRyukStrike(p);
-    } else if (p.move === "red") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
-      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_RED_GROW_PATCH
-      ctx.scale(visualScale, visualScale);
-      const pulse = 1 + Math.sin(frame * 0.34) * 0.08;
-      const redGlow = ctx.createRadialGradient(0, 0, p.radius * 0.15, 0, 0, p.radius * 1.75 * pulse);
-      redGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      redGlow.addColorStop(0.18, "rgba(254, 202, 202, 0.95)");
-      redGlow.addColorStop(0.48, "rgba(239, 68, 68, 0.82)");
-      redGlow.addColorStop(1, "rgba(127, 29, 29, 0)");
-      ctx.fillStyle = redGlow;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, p.radius * 1.75 * pulse, p.radius * 1.35 * pulse, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(248, 113, 113, 0.92)";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, p.radius * 0.88, p.radius * 0.72, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
-      ctx.beginPath();
-      ctx.ellipse(p.radius * 0.18, -p.radius * 0.12, p.radius * 0.34, p.radius * 0.24, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(127, 29, 29, 0.72)";
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.55, -p.radius * 0.42);
-      ctx.lineTo(-p.radius * 0.35, -p.radius * 0.16);
-      ctx.moveTo(-p.radius * 1.35, p.radius * 0.48);
-      ctx.lineTo(-p.radius * 0.24, p.radius * 0.22);
-      ctx.stroke();
-
-      ctx.strokeStyle = "rgba(254, 226, 226, 0.95)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.02, frame * 0.18, frame * 0.18 + Math.PI * 1.15);
-      ctx.stroke();
-    } else if (p.move === "blue") {
-      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
-      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_BLUE_GROW_PATCH
-      ctx.scale(visualScale, visualScale);
-      const spin = frame * 0.16;
-      const pulse = 1 + Math.sin(frame * 0.22) * 0.06;
-      const blueGlow = ctx.createRadialGradient(0, 0, 1, 0, 0, p.radius * 1.8 * pulse);
-      blueGlow.addColorStop(0, "rgba(2, 6, 23, 0.95)");
-      blueGlow.addColorStop(0.28, "rgba(29, 78, 216, 0.92)");
-      blueGlow.addColorStop(0.6, "rgba(56, 189, 248, 0.72)");
-      blueGlow.addColorStop(1, "rgba(56, 189, 248, 0)");
-      ctx.fillStyle = blueGlow;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.8 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.52, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(224, 242, 254, 0.9)";
-      ctx.beginPath();
-      ctx.arc(-p.radius * 0.15, -p.radius * 0.12, p.radius * 0.2, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(186, 230, 253, 0.9)";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      for (let i = 0; i < 3; i += 1) {
-        ctx.beginPath();
-        ctx.arc(0, 0, p.radius * (0.82 + i * 0.28), spin + i * 1.8, spin + i * 1.8 + Math.PI * 1.25);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(14, 165, 233, 0.65)";
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 6; i += 1) {
-        const a = spin + i * Math.PI / 3;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * p.radius * 1.05, Math.sin(a) * p.radius * 1.05);
-        ctx.lineTo(Math.cos(a + 0.42) * p.radius * 1.55, Math.sin(a + 0.42) * p.radius * 1.55);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(224, 242, 254, 0.78)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius + 6, spin, spin + Math.PI * 1.5);
-      ctx.stroke();
-    } else if (p.move === "fuga") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const pulse = 1 + Math.sin(frame * 0.36) * 0.08;
-      const flameGlow = ctx.createRadialGradient(-p.radius * 0.5, 0, 1, -p.radius * 0.2, 0, p.radius * 2.9 * pulse);
-      flameGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      flameGlow.addColorStop(0.2, "rgba(254, 240, 138, 0.92)");
-      flameGlow.addColorStop(0.48, "rgba(249, 115, 22, 0.82)");
-      flameGlow.addColorStop(1, "rgba(127, 29, 29, 0)");
-      ctx.fillStyle = flameGlow;
-      ctx.beginPath();
-      ctx.ellipse(-p.radius * 0.25, 0, p.radius * 2.75 * pulse, p.radius * 0.95 * pulse, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(2, 6, 23, 0.92)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.85, -p.radius * 0.18);
-      ctx.lineTo(p.radius * 1.06, -p.radius * 0.18);
-      ctx.lineTo(p.radius * 1.86, 0);
-      ctx.lineTo(p.radius * 1.06, p.radius * 0.18);
-      ctx.lineTo(-p.radius * 1.85, p.radius * 0.18);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(185, 28, 28, 0.96)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.25, -p.radius * 0.09);
-      ctx.lineTo(p.radius * 1.02, -p.radius * 0.09);
-      ctx.lineTo(p.radius * 1.55, 0);
-      ctx.lineTo(p.radius * 1.02, p.radius * 0.09);
-      ctx.lineTo(-p.radius * 1.25, p.radius * 0.09);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
-      ctx.beginPath();
-      ctx.moveTo(p.radius * 0.72, -p.radius * 0.58);
-      ctx.lineTo(p.radius * 2.12, 0);
-      ctx.lineTo(p.radius * 0.72, p.radius * 0.58);
-      ctx.lineTo(p.radius * 1.02, 0);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(254, 240, 138, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(p.radius * 0.88, -p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.72, 0);
-      ctx.lineTo(p.radius * 0.88, p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.08, 0);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(254, 240, 138, 0.92)";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.62, 0);
-      ctx.lineTo(p.radius * 1.2, 0);
-      ctx.stroke();
-
-      ctx.strokeStyle = "rgba(2, 6, 23, 0.82)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.65, -p.radius * 0.52);
-      ctx.lineTo(-p.radius * 0.92, 0);
-      ctx.lineTo(-p.radius * 1.65, p.radius * 0.52);
-      ctx.moveTo(-p.radius * 1.28, -p.radius * 0.44);
-      ctx.lineTo(-p.radius * 0.62, 0);
-      ctx.lineTo(-p.radius * 1.28, p.radius * 0.44);
-      ctx.stroke();
-
-      ctx.fillStyle = "rgba(254, 240, 138, 0.9)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 2.0, -p.radius * 0.48);
-      ctx.quadraticCurveTo(-p.radius * 2.75, 0, -p.radius * 2.0, p.radius * 0.5);
-      ctx.quadraticCurveTo(-p.radius * 1.48, 0, -p.radius * 2.0, -p.radius * 0.48);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(127, 29, 29, 0.92)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.2, -p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.25, -p.radius * 0.08);
-      ctx.moveTo(-p.radius * 1.2, p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.25, p.radius * 0.08);
-      ctx.stroke();
-    } else if (p.move === "slash") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      ctx.rotate(-0.1);
-      ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.4, -p.radius * 0.32);
-      ctx.lineTo(p.radius * 1.65, -p.radius * 0.95);
-      ctx.lineTo(p.radius * 1.35, -p.radius * 0.25);
-      ctx.lineTo(p.radius * 1.8, p.radius * 0.12);
-      ctx.lineTo(-p.radius * 1.2, p.radius * 0.68);
-      ctx.lineTo(-p.radius * 0.75, p.radius * 0.08);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = "rgba(220, 38, 38, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.1, -p.radius * 0.2);
-      ctx.lineTo(p.radius * 1.25, -p.radius * 0.62);
-      ctx.lineTo(p.radius * 0.95, -p.radius * 0.15);
-      ctx.lineTo(p.radius * 1.38, p.radius * 0.1);
-      ctx.lineTo(-p.radius * 0.95, p.radius * 0.48);
-      ctx.lineTo(-p.radius * 0.55, p.radius * 0.05);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "rgba(15, 23, 42, 0.95)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.2, p.radius * 0.45);
-      ctx.lineTo(p.radius * 1.45, -p.radius * 0.72);
-      ctx.stroke();
     } else if (p.move === "groundBreak") {
       // THRAGG_THEME_PATCH: Ground Break had no draw case and fell into
       // the generic fallback, which renders the red Sukuna-style slash -
@@ -27523,6 +26951,7 @@ function fixedUpdate() {
       finishRound(koWinner);
     }
   }
+  if (!paused) { tickFighterMotion(player); tickFighterMotion(enemy); }
   updateStage(); // STAGE_SELECT_PATCH
   applyPracticeSettingsTick();
   finalizeWalkingSfx();

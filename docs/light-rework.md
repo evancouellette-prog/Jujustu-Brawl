@@ -24,6 +24,17 @@ Stages have finished platform surfaces and more detailed city buildings. Moving 
 
 ## Validation
 
-Run `npm ci`, `npm run check`, and `npm test` with Node 18 or newer. Eleven regression tests cover cooldowns, summon placement and balance, Potato Chip, Ryuk movement and hit detection, ultimate timing, multiplayer serialization, and roster/stage rendering.
+Run `npm ci`, `npm run check`, and `npm test` with Node 18 or newer. Fifteen regression tests cover cooldowns, summon placement and balance, Potato Chip, Ryuk movement and hit detection, ultimate timing, multiplayer serialization, and roster/stage rendering.
 
 The previews were rendered from the game's actual canvas drawing code. Browser interaction, mobile layout, and a live two-player session still need a manual playtest; the preview browser could not reach the local server during this change.
+
+
+## Movement and sorcerer animation follow-up
+
+Running now uses a continuous planted-foot stride with toe roll and matching arm movement. Retreating uses shorter guarded steps. Jumping blends from a tucked rising pose into an extended fall, then briefly compresses on landing. Basic punches have anticipation, contact at the first active frame, and a smooth recovery. Light still leaves melee attacks to Ryuk, and Sanji keeps his kicks.
+
+Gojo and Sukuna have aimed casting poses, hand signs, and release follow-through. Blue energy follows Gojo's actual fists. Blue, Red, Hollow Purple, Dismantle, Cleave, World Slash, Fuga, and teleport visuals have been updated. Fuga charges as a fiery bow with an arrow. Shibuya Sukuna retains two arms during punches and casting. Other characters' special ability animations are preserved.
+
+![Movement and casting poses](previews/motion.png)
+
+The follow-up adds four regression checks for animation blending, first-active-frame punch contact, cast arm counts and online state, and full-cycle rendering across all skins. Browser playtesting and live publication are handled in this release session, with no scheduled future playtest.
