@@ -2484,7 +2484,7 @@ function canSendOnlinePacket() {
 }
 
 function compactProjectileForNetwork(p) {
-  return {
+  const compact = {
     owner: p.owner,
     move: p.move,
     x: Math.round(p.x),
@@ -2507,6 +2507,10 @@ function compactProjectileForNetwork(p) {
     noUltimateGain: Boolean(p.noUltimateGain),
     visualOnly: true
   };
+  if (p.move === "ryukStrike") {
+    for (const key of ["startX", "startY", "bodyX", "bodyY", "ryukX", "ryukY", "fistX", "fistY", "travelTicks", "windupTicks", "activeTicks", "recoveryTicks", "returnTicks", "startup", "startupMax", "age", "maxLife"]) compact[key] = p[key];
+  }
+  return compact;
 }
 let remoteInput = { left: false, right: false, up: false, down: false, block: false, rct: false, heavy: false, bluePunch: false };
 let onlineReady = { p1: false, p2: false };
@@ -2656,6 +2660,16 @@ const LIGHT_POTATO_FOCUS_TICKS = 10 * 60;
 const LIGHT_SUMMON_MISA_TICKS = 16 * 60;
 const LIGHT_SUMMON_SOICHIRO_TICKS = 18 * 60;
 const LIGHT_EYE_DEAL_FOCUS_TICKS = 5 * 60;
+const LIGHT_POTATO_EAT_TICKS = 40;
+const LIGHT_DEATH_NOTE_WRITE_TICKS = 84;
+const LIGHT_RYUK_SCALE = 0.92;
+const LIGHT_RYUK_REACH = 66;
+const LIGHT_RYUK_HAND_Y = -72;
+let lightWritingSeen = { player: 0, enemy: 0 };
+const LIGHT_SUMMON_STATS = {
+  misa: { health: 45, namePerTick: 0.15 },
+  soichiro: { health: 130, namePerTick: 0.08 }
+};
 
 // LIGHT_BROWN_EFFECTS_PATCH
 const LIGHT_BROWN = {
@@ -2690,8 +2704,8 @@ function getLightFocusedCooldown(f, baseTicks) {
   if (!isLight(f)) return baseTicks;
   const infoRatio = Math.max(0, Math.min(1, (f.informationMeter || 0) / LIGHT_INFO_MAX));
   const infoScale = 1 - infoRatio * 0.28;
-  const focusScale = (f.potatoFocusTicks || 0) > 0 ? 0.58 : 1;
-  return Math.max(12, Math.ceil(baseTicks * infoScale * focusScale));
+  // Focus accelerates running timers, so a cooldown is never discounted twice.
+  return Math.max(12, Math.ceil(baseTicks * infoScale));
 }
 
 function gainLightInfo(f, amount) {
@@ -2703,7 +2717,7 @@ function gainLightInfo(f, amount) {
 function gainLightIdentity(f, amount) {
   if (!isLight(f)) return;
   const infoBonus = 1 + Math.max(0, Math.min(100, f.informationMeter || 0)) / 220;
-  const focusBonus = (f.potatoFocusTicks || 0) > 0 ? 1.3 : 1;
+  const focusBonus = f.lightSummonType && f.lightSummonTicks > 0 && (f.potatoFocusTicks || 0) > 0 ? 1.3 : 1;
   f.identityProgress = Math.max(0, Math.min(LIGHT_IDENTITY_MAX, (f.identityProgress || 0) + amount * infoBonus * focusBonus));
   if (f.identityProgress >= LIGHT_IDENTITY_MAX) f.ultimateMeter = Math.max(f.ultimateMeter || 0, MAX_ULTIMATE);
 }
@@ -2716,33 +2730,28 @@ function getLightInfoRatio(f) {
   return Math.max(0, Math.min(1, ((f && f.informationMeter) || 0) / LIGHT_INFO_MAX));
 }
 
+function getLightInvestigationPlacement(f, aimPoint = null) {
+  const origin = getTechniqueOrigin(f, "nameInvestigation");
+  const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.techniqueAim) || {
+    x: origin.x + (f.dir || 1) * 160, y: f.y + f.h
+  };
+  const target = { x: Math.max(36, Math.min(STAGE_W - 36, aim.x)), y: Math.min(GROUND, aim.y) };
+  const dx = target.x - origin.x, dy = target.y - origin.y;
+  const distance = Math.hypot(dx, dy);
+  const scale = distance > LIGHT_SUMMON_MAX_RANGE ? LIGHT_SUMMON_MAX_RANGE / distance : 1;
+  return { x: origin.x + dx * scale, y: origin.y + dy * scale, dir: dx < 0 ? -1 : dx > 0 ? 1 : f.dir || 1 };
+}
+
 function setLightSummonAnchor(f, aimPoint = null) {
   if (!isLight(f)) return;
-  const center = getFighterCenter(f);
-  const side = f.dir || 1;
-  const aim = sanitizeAimPoint(aimPoint);
-
-  // LIGHT_INVESTIGATION_AIM_PATCH:
-  // Investigation summons should appear where the player aimed, not follow Light.
-  // SUMMON_GRAVITY_RANGE_PATCH: the aim point can no longer place a summon
-  // across the whole stage - it is clamped to the summon range around Light.
-  if (aim) {
-    const rangedX = Math.max(center.x - LIGHT_SUMMON_MAX_RANGE, Math.min(center.x + LIGHT_SUMMON_MAX_RANGE, aim.x));
-    f.lightSummonAnchorDir = aim.x >= center.x ? 1 : -1;
-    f.lightSummonAnchorX = Math.max(36, Math.min(STAGE_W - 36, rangedX));
-    f.lightSummonAnchorY = Math.max(84, Math.min(GROUND, aim.y));
-    f.lightSummonFallVy = 0;
-    return;
-  }
-
-  f.lightSummonAnchorDir = side;
-  f.lightSummonAnchorX = center.x - side * 102;
-  f.lightSummonAnchorY = f.y + f.h;
+  // The preview and cast share this exact endpoint, including diagonal range.
+  const point = getLightInvestigationPlacement(f, aimPoint);
+  f.lightSummonAnchorX = point.x;
+  f.lightSummonAnchorY = point.y;
+  f.lightSummonAnchorDir = point.dir;
   f.lightSummonFallVy = 0;
 }
 
-// SUMMON_GRAVITY_RANGE_PATCH: nearest standable surface below a summon's
-// feet - platform tops count, same casting rule as fighter shadows.
 function getLightSummonSurfaceY(centerX, footY) {
   let best = GROUND;
   let bestDistance = GROUND - footY;
@@ -2842,67 +2851,107 @@ function damageLightSummonByProjectile(projectile, f) {
   return true;
 }
 
+function getLightRyukHome(f) {
+  return { x: f.x + f.w / 2 - (f.dir || 1) * 62, y: f.y + f.h - 4 };
+}
+
+function getActiveRyukStrike(f) {
+  const owner = getFighterOwner(f);
+  return projectiles.find(p => p.move === "ryukStrike" && p.owner === owner && p.life > 0);
+}
+
 function startRyukStrike(f, aimPoint = null, cost = 0) {
-  if (!isLight(f)) return false;
-  const aim = sanitizeAimPoint(aimPoint) || mouseAimWorld;
+  if (!isLight(f) || f.attacking || getActiveRyukStrike(f)) return false;
+  const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.techniqueAim) || {
+    x: f.x + f.w / 2 + (f.dir || 1) * 180, y: f.y + 48
+  };
+  const home = getLightRyukHome(f);
+  const x = Math.max(40, Math.min(STAGE_W - 40, aim.x));
+  const y = Math.max(30, Math.min(GROUND - 18, aim.y));
+  const dir = x >= home.x ? 1 : -1;
+  const modelScale = LIGHT_RYUK_SCALE * 1.3;
+  const bodyX = x - dir * LIGHT_RYUK_REACH * modelScale;
+  const bodyY = y - LIGHT_RYUK_HAND_Y * modelScale;
+  const travelTicks = Math.max(4, Math.ceil(Math.hypot(bodyX - home.x, bodyY - home.y) / 72));
+  const windupTicks = 6, activeTicks = 6, recoveryTicks = 8;
+  const returnTicks = travelTicks;
+  const maxLife = travelTicks + windupTicks + activeTicks + recoveryTicks + returnTicks;
   if (cost > 0) f.ce = Math.max(0, f.ce - cost);
-  const infoRatio = getLightInfoRatio(f);
-  const radius = 66 + Math.floor(infoRatio * 28);
-  // SHINIGAMI_STRIKE_SWIFT_PATCH: was 8-18 ticks slow pop-in. Now a snap
-  // teleport-in: 4-8 ticks. Ryuk warps in instantly, slams, done.
-  const startup = Math.max(4, Math.ceil(8 - infoRatio * 3 - ((f.potatoFocusTicks || 0) > 0 ? 2 : 0)));
   projectiles.push({
-    owner: f === player ? "player" : "enemy",
-    move: "ryukStrike",
-    x: Math.max(40, Math.min(STAGE_W - 40, aim.x)),
-    y: Math.max(70, Math.min(GROUND - 60, aim.y)),
-    vx: 0,
-    vy: 0,
-    baseVx: 0,
-    baseVy: 0,
-    radius,
-    damage: Math.ceil(34 * getOutgoingDamageMultiplier(f)),
-    knockback: 34,
-    dir: f.dir,
-    aimX: 0,
-    aimY: 1,
-    angle: Math.PI / 2,
-    maxTravel: null,
-    traveled: 0,
-    life: 34,
-    startup,
-    startupMax: startup,
-    warningRadius: radius,
-    maxLife: 34,
-    hit: false
+    owner: getFighterOwner(f), move: "ryukStrike", x, y, dir,
+    vx: 0, vy: 0, baseVx: 0, baseVy: 0, aimX: dir, aimY: 0,
+    angle: dir > 0 ? 0 : Math.PI, radius: 18 + Math.round(getLightInfoRatio(f) * 6),
+    damage: Math.ceil(34 * getOutgoingDamageMultiplier(f)), knockback: 34,
+    startX: home.x, startY: home.y, bodyX, bodyY, ryukX: home.x, ryukY: home.y,
+    travelTicks, windupTicks, activeTicks, recoveryTicks, returnTicks,
+    startup: travelTicks + windupTicks, startupMax: travelTicks + windupTicks,
+    age: 0, life: maxLife, maxLife, hit: false, maxTravel: null
   });
-  // LIGHT_INFO_NAME_FILL_RULES_PATCH:
-  // Ryuk/Shinigami Strike gives no free Info or Name just for being cast.
-  // Info is awarded only if it actually hits.
   updateHud();
   return true;
+}
+
+function getRyukStrikePose(p) {
+  const age = p.age || 0;
+  const impactStart = p.travelTicks + p.windupTicks;
+  const returnStart = impactStart + p.activeTicks + p.recoveryTicks;
+  const owner = p.owner === "player" ? player : enemy;
+  const home = owner ? getLightRyukHome(owner) : { x: p.startX, y: p.startY };
+  let x = p.bodyX, y = p.bodyY, punch = 0, dir = p.dir;
+  if (age < p.travelTicks) {
+    const t = clamp01(age / p.travelTicks);
+    x = lerp(p.startX, p.bodyX, t); y = lerp(p.startY, p.bodyY, t);
+  } else if (age < impactStart) {
+    punch = -0.25 * Math.sin(clamp01((age - p.travelTicks) / p.windupTicks) * Math.PI);
+  } else if (age < impactStart + p.activeTicks) {
+    punch = 1;
+  } else if (age < returnStart) {
+    punch = 1 - easeOutQuad(clamp01((age - impactStart - p.activeTicks) / p.recoveryTicks));
+  } else {
+    const t = clamp01((age - returnStart) / p.returnTicks);
+    x = lerp(p.bodyX, home.x, t); y = lerp(p.bodyY, home.y, t);
+    dir = owner?.dir || dir;
+  }
+  const scale = LIGHT_RYUK_SCALE * 1.3;
+  const hand = { x: lerp(22, LIGHT_RYUK_REACH, punch), y: lerp(-46, LIGHT_RYUK_HAND_Y, punch) };
+  return { x, y, dir, punch, hand, fistX: x + dir * hand.x * scale, fistY: y + hand.y * scale };
+}
+
+function updateRyukStrike(p) {
+  const owner = p.owner === "player" ? player : enemy;
+  if (!owner || owner.ko || !isLight(owner)) return false;
+  p.age = (p.age || 0) + 1;
+  p.life = Math.max(0, p.maxLife - p.age);
+  p.startup = Math.max(0, p.startupMax - p.age);
+  const pose = getRyukStrikePose(p);
+  p.ryukX = pose.x; p.ryukY = pose.y;
+  p.fistX = pose.fistX; p.fistY = pose.fistY;
+  const target = getOpponent(owner);
+  if (!p.hit && target && p.age >= p.startupMax && p.age < p.startupMax + p.activeTicks) {
+    if (!damageLightSummonByProjectile(p, target) && shouldResolveProjectileHit(p, target) && projectileOverlapsTarget(p, target)) {
+      applyProjectileHit(p, target);
+    }
+  }
+  // Keep Ryuk visible through follow-through and his fast flight home after a hit.
+  return p.life > 0;
 }
 
 function startNameInvestigation(f, cost = 0, aimPoint = null) {
   if (!isLight(f)) return false;
   if (cost > 0) f.ce = Math.max(0, f.ce - cost);
 
-  const fallbackPoint = aimPoint || (getOpponent(f) ? {
-    x: getOpponent(f).x + getOpponent(f).w / 2,
-    y: getOpponent(f).y + getOpponent(f).h
-  } : null);
-  setLightSummonAnchor(f, fallbackPoint);
+  setLightSummonAnchor(f, aimPoint);
 
   if (f.lightSummonStage <= 1 && f.lightSummonType !== "misa") {
     f.lightSummonType = "misa";
-    f.lightSummonHealth = 50;
-    f.lightSummonMaxHealth = 50;
+    f.lightSummonHealth = LIGHT_SUMMON_STATS.misa.health;
+    f.lightSummonMaxHealth = LIGHT_SUMMON_STATS.misa.health;
     f.lightSummonTicks = LIGHT_SUMMON_MISA_TICKS;
     f.lightSummonStage = 1;
   } else if (f.lightSummonStage <= 2 && f.lightSummonType !== "soichiro") {
     f.lightSummonType = "soichiro";
-    f.lightSummonHealth = 110;
-    f.lightSummonMaxHealth = 110;
+    f.lightSummonHealth = LIGHT_SUMMON_STATS.soichiro.health;
+    f.lightSummonMaxHealth = LIGHT_SUMMON_STATS.soichiro.health;
     f.lightSummonTicks = LIGHT_SUMMON_SOICHIRO_TICKS;
     f.lightSummonStage = 2;
   } else {
@@ -2938,12 +2987,14 @@ function usePotatoChip(f) {
   // LIGHT_BALANCE_PATCH: can't eat through a combo - only usable while
   // actually safe, and it opens a brief real window where Light can't
   // block/attack/dodge, matching "no protection while being activated."
-  if (!isLight(f) || f.ko || f.knockdown || f.stun > 0 || f.dodging > 0 || (f.potatoCooldown || 0) > 0 || gameState !== "playing" || paused || gameOver) return false;
+  if (!isLight(f) || f.ko || f.knockdown || f.stun > 0 || f.dodging > 0 || f.attacking || isSpecialLocked(f) || (f.potatoCooldown || 0) > 0 || gameState !== "playing" || paused || gameOver) return false;
   f.health = Math.min(f.maxHealth, f.health + 24);
   f.delayedHealth = Math.max(f.delayedHealth || 0, f.health);
   f.potatoCooldown = LIGHT_POTATO_COOLDOWN_TICKS;
   f.potatoFocusTicks = LIGHT_POTATO_FOCUS_TICKS;
-  f.potatoVulnerableTicks = 14;
+  f.potatoVulnerableTicks = LIGHT_POTATO_EAT_TICKS;
+  f.potatoEatingTicks = LIGHT_POTATO_EAT_TICKS;
+  f.blocking = false;
   // Potato gives healing/focus, not free Info or Name.
   spawnHitSpark(f.x + f.w / 2, f.y + 42, f.dir, "brown");
   updateHud();
@@ -2953,6 +3004,16 @@ function usePotatoChip(f) {
 function updateLightSystems(f, opponent) {
   if (!isLight(f)) return;
 
+  if ((f.potatoFocusTicks || 0) > 0) {
+    for (const key of ["lightRyukCooldown", "lightInvestigationCooldown", "techniqueCooldown", "punchCooldown", "dodgeCooldown", "shieldCooldown"]) {
+      f[key] = Math.max(0, (f[key] || 0) - 1);
+    }
+  }
+  if (f.potatoEatingTicks > 0) f.potatoEatingTicks -= 1;
+  if (f.ko || f.stun > 0 || f.knockdown) {
+    f.potatoEatingTicks = 0;
+    f.potatoVulnerableTicks = 0;
+  }
   if (f.potatoCooldown > 0) f.potatoCooldown -= 1;
   if (f.potatoFocusTicks > 0) f.potatoFocusTicks -= 1;
   if (f.potatoVulnerableTicks > 0) f.potatoVulnerableTicks -= 1;
@@ -2980,10 +3041,8 @@ function updateLightSystems(f, opponent) {
       f.lightSummonFallVy = 0;
     }
 
-    const nearby = opponent ? Math.abs((f.x + f.w / 2) - (opponent.x + opponent.w / 2)) < 360 : false;
-    // Name is filled by Investigation only.
-    // Misa is faster; Soichiro is slower but tougher.
-    const rate = (f.lightSummonType === "misa" ? 0.24 : 0.13) * (nearby ? 1.15 : 0.82);
+    const nearby = opponent ? Math.hypot(f.lightSummonAnchorX - (opponent.x + opponent.w / 2), f.lightSummonAnchorY - (opponent.y + opponent.h)) < 360 : false;
+    const rate = LIGHT_SUMMON_STATS[f.lightSummonType].namePerTick * (nearby ? 1.15 : 0.82);
     gainLightIdentity(f, rate);
     gainLightInfo(f, rate * 0.45);
     updateLightSummonUnderAttack(f, opponent);
@@ -3005,27 +3064,47 @@ function updateLightSystems(f, opponent) {
 
 function startDeathNoteUltimate(f) {
   if (!isLight(f)) return false;
-  if (!lightIdentityComplete(f)) {
-    showActionWarning("Identity Not Complete");
-    return false;
-  }
+  if (!lightIdentityComplete(f)) { showActionWarning("Identity Not Complete"); return false; }
   if (!canStartUltimate(f)) return false;
-
   const target = getOpponent(f);
   if (!target || target.ko) return false;
-
-  triggerUltCutscene(f); // ULT_CUTSCENES_PATCH
+  f.identityProgress = 0;
   f.ultimateMeter = 0;
   f.ultimateAiming = false;
+  f.ultimateHasReleased = false;
   f.ultimateMove = "deathNote";
-  f.ultimateStartup = f.eyeDealUsed ? 28 : 50;
-  f.ultimateRecovery = f.eyeDealUsed ? 30 : 42;
-  f.vx *= 0.25;
+  f.ultimateStartup = LIGHT_DEATH_NOTE_WRITE_TICKS;
+  f.ultimateRecovery = 24;
+  f.vx = 0;
   f.blocking = false;
+  f.deathNoteCastId = (f.deathNoteCastId || 0) + 1;
+  syncDeathNoteWritingEffect(f);
+  updateHud();
+  return true;
+}
 
+function syncDeathNoteWritingEffect(f) {
+  if (!isLight(f) || f.ultimateMove !== "deathNote" || f.ultimateStartup <= 0) return;
+  const owner = getFighterOwner(f);
+  if ((f.deathNoteCastId || 0) <= lightWritingSeen[owner]) return;
+  lightWritingSeen[owner] = f.deathNoteCastId;
+  const target = getOpponent(f);
+  triggerUltimateScreenEffect("deathNoteWriting", LIGHT_DEATH_NOTE_WRITE_TICKS + 24);
+  ultimateScreenEffect.ticks = Math.min(ultimateScreenEffect.maxTicks, f.ultimateStartup + 24);
+  ultimateScreenEffect.owner = owner;
+  ultimateScreenEffect.skinId = skinOf(f);
+  ultimateScreenEffect.targetName = isPracticeDummy(target) ? "Practice Dummy" : getTechniqueCharacterName(target?.technique);
+}
+
+function resolveDeathNoteUltimate(f) {
+  if (f.ultimateHasReleased || f.ko) return;
+  f.ultimateHasReleased = true;
+  // Each online player owns their damage; remote copies only animate.
+  if (gameMode === "online" && ((onlineRole === "p1" && f === enemy) || (onlineRole === "p2" && f === player))) return;
+  const target = getOpponent(f);
+  if (!target || target.ko) return;
   const eyeBonus = f.eyeDealUsed ? 1.18 : 1;
-  const damage = Math.ceil((target.maxHealth * 0.42 + 86) * eyeBonus);
-  const dealt = applyFighterDamage(target, damage);
+  const dealt = applyFighterDamage(target, Math.ceil((target.maxHealth * 0.42 + 86) * eyeBonus));
   target.stun = Math.max(target.stun || 0, f.eyeDealUsed ? 84 : 62);
   target.hurt = Math.max(target.hurt || 0, 30);
   target.deathNoteSlowTicks = 6 * 60;
@@ -3034,13 +3113,14 @@ function startDeathNoteUltimate(f) {
   target.vy = Math.min(target.vy || 0, -5.5);
   target.grounded = false;
   gainUltimate(f, dealt * ULT_DAMAGE_GAIN_SCALE);
-  spawnHitSpark(target.x + target.w / 2, target.y + 34, target.dir, "brown");
-  spawnHitSpark(target.x + target.w / 2, target.y + 68, -target.dir, "brown");
-  triggerUltimateScreenEffect("deathNote", 92);
+  spawnHitSpark(target.x + target.w / 2, target.y + 44, target.dir, "brown");
+  if (gameMode === "online" && onlineRole === "p2" && f === enemy) {
+    sendOnlineDamage({ damage: dealt, blocked: false, dir: f.dir, knockback: Math.abs(target.vx),
+      stun: target.stun, vy: target.vy, playerHealth: target.health,
+      deathNoteSlowTicks: target.deathNoteSlowTicks, deathNoteFearTicks: target.deathNoteFearTicks });
+  }
   updateHud();
-
   if (!pacifistBot && target.health <= 0) startKnockout(f, target);
-  return true;
 }
 
 function damageLightInformationOnHeavyHit(defender, amount) {
@@ -3082,6 +3162,7 @@ function getTechniqueCharacterName(technique) {
   if (technique === "jiji") return "Jiji"; // JIJI_PATCH
   if (technique === "david") return "David"; // DAVID_PATCH
   if (technique === "akira") return "Akira"; // AKIRA_PATCH
+  if (technique === "gardener") return "Crazy Dave";
   return "Gojo";
 }
 
@@ -3434,7 +3515,7 @@ function getTechniqueMoveKey(f, slot) {
 function getTechniqueDisplayName(move) {
   if (move === "slash") return "DISMANTLE";
   if (move === "fuga") return "FUGA";
-  if (move === "ryukStrike") return "RYUK";
+  if (move === "ryukStrike") return "SHINIGAMI STRIKE";
   if (move === "nameInvestigation") return "INVESTIGATE";
   if (move === "groundBreak") return "GROUND BREAK";
   if (move === "flyingDash") return "FLIGHT";
@@ -3986,6 +4067,9 @@ function makeFighter(config) {
     practiceIdleTicks: PRACTICE_BOT_RETURN_TICKS,
     practiceHomeX: config.x,
     walkCycle: 0,
+    castPoseMove: null,
+    castPoseTicks: 0,
+    castPoseAngle: 0,
 
     informationMeter: 0,
     identityProgress: 0,
@@ -4001,6 +4085,8 @@ function makeFighter(config) {
     potatoCooldown: 0,
     potatoFocusTicks: 0,
     potatoVulnerableTicks: 0,
+    potatoEatingTicks: 0,
+    deathNoteCastId: 0,
     lightRyukCooldown: 0,
     lightRyukCooldownMax: 0,
     lightInvestigationCooldown: 0,
@@ -4056,6 +4142,7 @@ function applyTechniqueStats(f, preserveMeters = false) {
     f.potatoFocusTicks = 0;
     f.potatoCooldown = 0;
     f.potatoVulnerableTicks = 0;
+    f.potatoEatingTicks = 0;
     f.lightRyukCooldown = 0;
     f.lightRyukCooldownMax = 0;
     f.lightInvestigationCooldown = 0;
@@ -4371,6 +4458,7 @@ function updateTechniqueCooldownHud(f, slots) {
   slots.forEach((hud, index) => {
     if (!hud.slot || !hud.label || !hud.fill || !hud.status) return;
     const move = moves[index];
+    hud.slot.classList.add("unified-cooldown");
     hud.slot.classList.toggle("hidden", !move);
     if (!move) return;
 
@@ -4656,22 +4744,24 @@ function applyFighterDamage(defender, damage) {
   return amount;
 }
 
+function clearFighterAbilityCooldowns(f) {
+  // All fighter ability timers use this suffix. Keep durations and recovery frames.
+  for (const key of Object.keys(f)) {
+    if (key.endsWith("Cooldown") && typeof f[key] === "number") f[key] = 0;
+  }
+  if (f.davePlantCooldowns) {
+    for (const plant of Object.keys(f.davePlantCooldowns)) f.davePlantCooldowns[plant] = 0;
+  }
+  f.pendingPunchCooldown = false;
+  f.ctLockTimer = 0;
+  f.jijiRevertLockTicks = 0;
+}
+
 function applyPracticeSettingsTick() {
   if (!pacifistBot || !player) return;
   if (practiceSettings.infiniteCe) player.ce = player.maxCe;
   if (practiceSettings.noCooldowns) {
-    player.techniqueCooldown = 0;
-    player.teleportCooldown = 0;
-    player.fugaCooldown = 0;
-    player.bluePunchCooldown = 0;
-    player.dodgeCooldown = 0;
-    player.punchCooldown = 0;
-    player.pendingPunchCooldown = false;
-    player.rctCooldown = 0;
-    player.shieldCooldown = 0;
-    player.simpleDomainCooldown = 0;
-    player.bindingVowCooldown = 0;
-    player.sukunaThrowComboCooldown = 0;
+    clearFighterAbilityCooldowns(player);
   }
   pinStationaryPracticeDummy(enemy);
 }
@@ -5867,6 +5957,7 @@ function syncHostPlayerToJoiner(remotePlayer) {
   // Player 1 during hurt/stun frames, which made the host look frozen on P2's
   // screen even while the host was moving normally on their own screen.
   Object.assign(player, remotePlayer);
+  syncDeathNoteWritingEffect(player);
 }
 
 function applyJoinerFighterStateOnHost(remoteFighter) {
@@ -5882,10 +5973,10 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
     "barrageTimer", "barrageDuration", "barrageHitsDone", "barrageDamageRemaining", "barrageKnockback", "barrageDir", "barrageTarget", "barrageLockX", "barrageLockY",
     "grabThrowTimer", "grabThrowDuration", "grabThrowDir", "grabThrowTarget", "grabThrowAim", "grabThrowLockX", "grabThrowLockY",
     "bluePunchHoldTicks", "bluePunchActiveTicks", "bluePunchCooldown", "bluePunchChases", "bluePunchFlash",
-    "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimPoint",
+    "castPoseMove", "castPoseTicks", "castPoseAngle", "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimPoint",
     "ce", "maxCe", "ultimateMeter", "domainStartup", "domainAttemptType", "simpleDomainTicks", "simpleDomainFlash", "simpleDomainCooldown",
     "bindingVowType", "bindingVowTicks", "bindingVowCooldown", "bindingVowChoiceTicks", "bindingVowQuote", "bindingVowQuoteTicks", "bindingVowFlash", "sukunaThrowComboCooldown",
-    "informationMeter", "identityProgress", "lightSummonStage", "lightSummonType", "lightSummonHealth", "lightSummonMaxHealth", "lightSummonTicks", "lightSummonHitFlash", "lightSummonAnchorX", "lightSummonAnchorY", "lightSummonAnchorDir", "potatoCooldown", "potatoFocusTicks", "potatoVulnerableTicks", "lightRyukCooldown", "lightRyukCooldownMax", "lightInvestigationCooldown", "lightInvestigationCooldownMax", "eyeDealUsed", "eyeDealGlowTicks", "deathNoteSlowTicks", "deathNoteFearTicks", "ctLockTimer",
+    "informationMeter", "identityProgress", "lightSummonStage", "lightSummonType", "lightSummonHealth", "lightSummonMaxHealth", "lightSummonTicks", "lightSummonHitFlash", "lightSummonAnchorX", "lightSummonAnchorY", "lightSummonAnchorDir", "potatoCooldown", "potatoFocusTicks", "potatoVulnerableTicks", "potatoEatingTicks", "deathNoteCastId", "ultimateStartup", "ultimateRecovery", "ultimateMove", "ultimateHasReleased", "lightSummonFallVy", "lightRyukCooldown", "lightRyukCooldownMax", "lightInvestigationCooldown", "lightInvestigationCooldownMax", "eyeDealUsed", "eyeDealGlowTicks", "deathNoteSlowTicks", "deathNoteFearTicks", "ctLockTimer",
     "thraggGrabState", "thraggGrabTimer", "thraggGrabCooldown", "thraggFlightTicks", "thraggDashCooldown", "grabHeldTimer", "grabHeldBy", "grabLockY", "grabTechable",
     // SANJI_PATCH
     "sanjiHeat", "sanjiDiableTicks", "sanjiDiableAir", "sanjiDiableCooldown", "sanjiSkyWalkJumps", "sanjiSkyWalkCooldown", "sanjiDiveKickTicks", "sanjiMuttonTicks", "sanjiMuttonCooldown", "sanjiUltTicks", "sanjiBoeufUsed", "sanjiUtensil", "sanjiUtensilCooldown", "sanjiThrowTicks", "sanjiCookTicks", "sanjiCookCooldown", "burnTicks",
@@ -5918,6 +6009,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
 
     enemy[field] = remoteFighter[field];
   });
+  syncDeathNoteWritingEffect(enemy);
 
   if (isValidTechnique(remoteFighter.technique)) {
     enemy.technique = remoteFighter.technique;
@@ -6446,6 +6538,9 @@ function getFighterNetworkState(f) {
     potatoCooldown: f.potatoCooldown,
     potatoFocusTicks: f.potatoFocusTicks,
     potatoVulnerableTicks: f.potatoVulnerableTicks,
+    potatoEatingTicks: f.potatoEatingTicks,
+    deathNoteCastId: f.deathNoteCastId,
+    lightSummonFallVy: f.lightSummonFallVy,
     lightRyukCooldown: f.lightRyukCooldown,
     lightRyukCooldownMax: f.lightRyukCooldownMax,
     lightInvestigationCooldown: f.lightInvestigationCooldown,
@@ -6456,6 +6551,9 @@ function getFighterNetworkState(f) {
     deathNoteFearTicks: f.deathNoteFearTicks,
     ctLockTimer: f.ctLockTimer,
     walkCycle: f.walkCycle,
+    castPoseMove: f.castPoseMove,
+    castPoseTicks: f.castPoseTicks,
+    castPoseAngle: f.castPoseAngle,
     onPlatform: f.onPlatform
   };
 }
@@ -6564,7 +6662,8 @@ function resetRoundActors() {
   groundEraseEffects = [];
   ultimateChargeEffects = [];
   ultimateScreenEffect = { ticks: 0, maxTicks: 0, kind: "" };
-  ultCutscene = null; // ULT_CUTSCENES_PATCH
+  ultCutscene = null;
+  lightWritingSeen = { player: 0, enemy: 0 };
   cinematicZoomTicks = 0;
   ultimateFocusOwner = null;
   pendingDomain = null;
@@ -7115,12 +7214,10 @@ function updateExtraCooldownHud(container, f) {
     const isResource = item.mode === "resource";
     const isActiveTimer = item.mode === "active";
     const ready = isResource ? ratio >= 1 : ratio <= 0;
-    const fillPercent = isResource
-      ? Math.max(4, ratio * 100)
-      : ready ? 100 : Math.max(4, ratio * 100);
+    const fillPercent = isResource || isActiveTimer ? ratio * 100 : (1 - ratio) * 100;
 
     const row = document.createElement("div");
-    row.className = `extra-cooldown ct-slot ${ready ? "ready" : "cooling"} ${f.technique === "shrine" ? "sukuna-cooldown" : f.technique === "deathnote" ? "light-cooldown" : f.technique === "brawler" ? "thragg-cooldown" : f.technique === "blackleg" ? "sanji-cooldown" : f.technique === "hivemind" ? "vecna-cooldown" : f.technique === "zealot" ? "zealot-cooldown" : f.technique === "spider" ? "spider-cooldown" : f.technique === "beast" ? "beast-cooldown" : f.technique === "jiji" ? "jiji-cooldown" : f.technique === "david" ? "david-cooldown" : f.technique === "akira" ? "akira-cooldown" : "gojo-cooldown"} ${item.style || ""}`;
+    row.className = `extra-cooldown ct-slot unified-cooldown ${ready ? "ready" : "cooling"} ${f.technique === "shrine" ? "sukuna-cooldown" : f.technique === "deathnote" ? "light-cooldown" : f.technique === "brawler" ? "thragg-cooldown" : f.technique === "blackleg" ? "sanji-cooldown" : f.technique === "hivemind" ? "vecna-cooldown" : f.technique === "zealot" ? "zealot-cooldown" : f.technique === "spider" ? "spider-cooldown" : f.technique === "beast" ? "beast-cooldown" : f.technique === "jiji" ? "jiji-cooldown" : f.technique === "david" ? "david-cooldown" : f.technique === "akira" ? "akira-cooldown" : "gojo-cooldown"} ${item.style || ""}`;
 
     const label = document.createElement("span");
     label.className = "extra-cooldown-label ct-label";
@@ -7934,6 +8031,7 @@ function beginAttack(f, type) {
 }
 
 function startAttack(f, type) {
+  if (isLight(f) && getActiveRyukStrike(f)) return;
   if (gameOver || isSpecialLocked(f) || f.rctHealing || f.chargingTechnique || f.fugaAiming || f.stun > 0 || f.dodging > 0 || f.knockdown || f.punchCooldown > 0 || f.pendingPunchCooldown) return;
   // SANJI_PATCH: pressing attack during Sky Walk performs the diving kick.
   if (isSanji(f) && trySanjiDiveKick(f)) return;
@@ -12321,6 +12419,7 @@ function performTeleport(f, aimPoint = null) {
   f.vy = 0;
   f.ce = Math.max(0, f.ce - teleportCost);
   f.teleportCooldown = GOJO_TELEPORT_COOLDOWN_TICKS;
+  beginCastMotion(f, "teleport");
   f.techniqueAim = null;
   spawnTeleportEffect(start, { x: f.x + f.w / 2, y: f.y + f.h / 2 }, f.dir);
   spawnHitSpark(start.x, start.y, f.dir, "blue");
@@ -12514,6 +12613,7 @@ function startTechnique(f, slot, chargeRatio = 0, aimPoint = null, releasingChar
   const damageScale = (chargedLimitless ? 1 + finalCharge * (move === "red" ? 1.45 : 1.25) : 1) * (voidBoost ? 1.28 : shrineBoost ? 1.12 : 1) * bindingDamageBoost;
   const knockbackScale = (chargedLimitless ? 1 + finalCharge * (move === "red" ? 1.25 : 1.08) : 1) * (move === "red" ? 1.28 : move === "blue" ? 1.32 : 1) * (voidBoost && move === "blue" ? 1.9 : voidBoost ? 1.32 : shrineBoost ? 1.16 : 1);
   playTechniqueShootSfx(f, move);
+  beginCastMotion(f, move, aimVector.angle);
 
   projectiles.push({
     owner: f === player ? "player" : "enemy",
@@ -12587,6 +12687,7 @@ function startFuga(f, aimPoint = null) {
   f.vx *= 0.35;
 
   const previewDistance = getAimPreviewDistance(move, spec, 0, aimVector, f, spec.radius);
+  beginCastMotion(f, move, aimVector.angle);
   const spawnDistance = Math.min(48, Math.max(0, previewDistance - 8));
   const travelDistance = Math.max(0, previewDistance - spawnDistance);
   projectiles.push({
@@ -12950,7 +13051,6 @@ function triggerUltimateScreenEffect(kind, ticks) {
 const ULT_CUTSCENES = {
   limitless:  { name: "HOLLOW PURPLE", tint: "rgba(88, 28, 168, 0.55)", accent: "#a855f7", ticks: 90 },
   shrine:     { name: "WORLD SLASH",   tint: "rgba(69, 10, 10, 0.60)",  accent: "#f87171", ticks: 90 },
-  deathnote:  { name: "THE DEATH NOTE",tint: "rgba(60, 30, 6, 0.60)",   accent: "#f59e0b", ticks: 96 },
   brawler:    { name: "WAR STOMP",     tint: "rgba(90, 20, 12, 0.60)",  accent: "#f4f4f5", ticks: 84 },
   blackleg:   { name: "IFRIT JAMBE",   tint: "rgba(90, 24, 4, 0.60)",   accent: "#fb923c", ticks: 84 },
   hivemind:   { name: "UPSIDE DOWN",   tint: "rgba(60, 10, 20, 0.65)",  accent: "#be185d", ticks: 96 },
@@ -13208,6 +13308,23 @@ function releaseUltimateAim(f, aimPoint = null) {
 
 function updateUltimateState(f) {
   if (!f) return;
+  if (isLight(f) && f.ultimateMove === "deathNote") {
+    if (f.ko) {
+      f.ultimateStartup = 0; f.ultimateRecovery = 0; f.ultimateMove = null;
+      return;
+    }
+    f.blocking = false;
+    f.vx *= 0.52;
+    if (f.ultimateStartup > 0) {
+      f.ultimateStartup -= 1;
+      if (f.ultimateStartup === 0) resolveDeathNoteUltimate(f);
+    } else if (f.ultimateRecovery > 0) {
+      f.ultimateRecovery -= 1;
+    } else {
+      f.ultimateMove = null;
+    }
+    return;
+  }
   if (f.ultimateAiming) {
     f.ultimateAimTicks = Math.min(ULT_AIM_HOLD_TICKS, (f.ultimateAimTicks || 0) + 1);
     f.blocking = false;
@@ -13252,6 +13369,7 @@ function releaseUltimate(f) {
 function releaseHollowPurple(f) {
   const center = getFighterCenter(f);
   const aimVector = getTechniqueAimVector(f, "blue", f.ultimateAimPoint || f.techniqueAim);
+  beginCastMotion(f, "purple", aimVector.angle);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
   const speed = 13.4;
   const radius = 52;
@@ -13292,6 +13410,7 @@ function releaseHollowPurple(f) {
 function releaseWorldCuttingSlash(f) {
   const center = getFighterCenter(f);
   const aimVector = getTechniqueAimVector(f, "slash", f.ultimateAimPoint || f.techniqueAim);
+  beginCastMotion(f, "worldSlash", aimVector.angle);
   if (Math.abs(aimVector.x) > 0.08) f.dir = aimVector.dir;
   const speed = 15.8;
   const radius = 50;
@@ -14761,6 +14880,8 @@ function applyHit(attacker, defender) {
 
 function applyOnlineDamageToPlayer(hit) {
   if (roundEnding || roundResolved || player.ko || pacifistBot) return;
+  if (Number.isFinite(hit.deathNoteSlowTicks)) player.deathNoteSlowTicks = Math.max(player.deathNoteSlowTicks || 0, Math.min(360, hit.deathNoteSlowTicks));
+  if (Number.isFinite(hit.deathNoteFearTicks)) player.deathNoteFearTicks = Math.max(player.deathNoteFearTicks || 0, Math.min(360, hit.deathNoteFearTicks));
   enemy.hasHit = true;
 
   // ONLINE_P2_HIT_MOVEMENT_FIX
@@ -15170,7 +15291,9 @@ function projectileOverlapsTarget(projectile, target) {
   }
 
   if (projectile.move === "ryukStrike") {
-    return circleOverlapsRect(projectile.x, projectile.y, projectile.radius, target);
+    const age = projectile.age || 0;
+    if (age < projectile.startupMax || age >= projectile.startupMax + projectile.activeTicks) return false;
+    return circleOverlapsRect(projectile.fistX, projectile.fistY, projectile.radius, target);
   }
 
   const box = { x: projectile.x - projectile.radius, y: projectile.y - projectile.radius, w: projectile.radius * 2, h: projectile.radius * 2 };
@@ -15234,7 +15357,11 @@ function applyInfinitySlowToProjectile(projectile) {
 function updateProjectiles() {
   const activeProjectiles = [];
   for (const p of projectiles) {
-    p.visualSpawnAge = (p.visualSpawnAge || 0) + 1; // VISUAL_SPAWN_AGE_INCREMENT_PATCH
+    p.visualSpawnAge = (p.visualSpawnAge || 0) + 1;
+    if (p.move === "ryukStrike") {
+      if (updateRyukStrike(p)) activeProjectiles.push(p);
+      continue;
+    }
     if (p.move === "cleave") {
       p.vx *= 0.84;
       p.vy = (p.vy || 0) * 0.84;
@@ -15308,7 +15435,7 @@ function updateProjectiles() {
 }
 
 function spawnProjectileDisperse(projectile) {
-  if (projectile.move === "cleave") return;
+  if (projectile.move === "cleave" || projectile.move === "ryukStrike") return;
   // DAVID_PATCH: the arm rocket bursts into a small explosion.
   if (projectile.move === "davidRocket") {
     const n = projectile.davidBig ? 10 : 7;
@@ -15417,7 +15544,14 @@ function updateHitSparks() {
     effect.life -= 1;
   });
   ultimateChargeEffects = ultimateChargeEffects.filter((effect) => effect.life > 0);
-  if (ultimateScreenEffect.ticks > 0) ultimateScreenEffect.ticks -= 1;
+  if (ultimateScreenEffect.ticks > 0) {
+    const writer = ultimateScreenEffect.owner === "player" ? player : enemy;
+    if (ultimateScreenEffect.kind === "deathNoteWriting" && writer?.ultimateMove === "deathNote") {
+      ultimateScreenEffect.ticks = writer.ultimateStartup > 0 ? writer.ultimateStartup + 24 : writer.ultimateRecovery;
+    } else {
+      ultimateScreenEffect.ticks -= 1;
+    }
+  }
   if (cinematicZoomTicks > 0) cinematicZoomTicks -= 1;
 }
 
@@ -16719,9 +16853,7 @@ function updateFighter(f, opponent) {
   // WALK_CYCLE_ALL_PATCH: every fighter advances the continuous walk cycle
   // (it used to be shrine-only, leaving the others on a snappy 8-frame gait).
   if (f.grounded && Math.abs(f.vx) > 0.3 && !f.attacking && !f.blocking && f.stun <= 0 && f.dodging <= 0) {
-    f.walkCycle = ((f.walkCycle || 0) + Math.abs(f.vx) * 0.065) % (Math.PI * 2);
-  } else if (f.grounded && !f.attacking && !f.blocking) {
-    f.walkCycle = 0;
+    f.walkCycle = ((f.walkCycle || 0) + Math.abs(f.vx) * 0.095) % (Math.PI * 2);
   }
   updateWalkingSfx(f);
   f.vx *= f.grounded ? 0.86 : 0.97;
@@ -18300,22 +18432,7 @@ function drawPlatforms() {
 }
 
 function drawBuildings(offset, baseY, color) {
-  ctx.fillStyle = color;
-  const widths = [68, 82, 54, 98, 74, 62, 86, 58, 112, 70, 64, 96];
-  let x = -120 + offset;
-  for (let i = 0; x < STAGE_W + 120; i += 1) {
-    const width = widths[i % widths.length];
-    const height = 92 + ((i * 37) % 115);
-    ctx.fillRect(Math.floor(x), baseY - height, width, height);
-    ctx.fillStyle = "rgba(255, 224, 113, 0.42)";
-    for (let wx = x + 14; wx < x + width - 12; wx += 22) {
-      for (let wy = baseY - height + 18; wy < baseY - 18; wy += 28) {
-        if ((Math.floor(wx + wy + i * 9) % 3) !== 0) ctx.fillRect(Math.floor(wx), Math.floor(wy), 8, 12);
-      }
-    }
-    ctx.fillStyle = color;
-    x += width + 16;
-  }
+  drawDetailedBuildings(offset, baseY, color);
 }
 
 function drawViewportBackdrop() {
@@ -19151,7 +19268,7 @@ function getBaseTechniqueSkin(f, flash) {
     };
   }
 
-  // DAVE_PATCH: Crazy Dave - white tank top, khaki pants, big brown beard
+  // DAVE_PATCH: Crazy Dave - white tank top, khaki pants, and saucepan hat
   // and the famous saucepan helmet (both drawn in the head section).
   if (f.technique === "gardener") {
     return {
@@ -19566,49 +19683,7 @@ function drawUltimateAimPreview(f) {
 }
 
 function drawTeleportEffects() {
-  for (const effect of teleportEffects) {
-    const t = effect.life / effect.maxLife;
-    const age = 1 - t;
-    ctx.save();
-    ctx.globalAlpha = t;
-
-    const beam = ctx.createLinearGradient(effect.startX, effect.startY, effect.endX, effect.endY);
-    beam.addColorStop(0, `rgba(224, 242, 254, ${0.9 * t})`);
-    beam.addColorStop(0.5, `rgba(56, 189, 248, ${0.75 * t})`);
-    beam.addColorStop(1, `rgba(37, 99, 235, ${0.95 * t})`);
-    ctx.strokeStyle = beam;
-    ctx.lineCap = "round";
-    ctx.lineWidth = 14 * t + 2;
-    ctx.beginPath();
-    ctx.moveTo(effect.startX, effect.startY);
-    ctx.lineTo(effect.endX, effect.endY);
-    ctx.stroke();
-
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * t})`;
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([18 * t + 4, 10]);
-    ctx.beginPath();
-    ctx.moveTo(effect.startX, effect.startY);
-    ctx.lineTo(effect.endX, effect.endY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    for (const point of [{ x: effect.startX, y: effect.startY }, { x: effect.endX, y: effect.endY }]) {
-      const ring = 18 + age * 34;
-      ctx.strokeStyle = `rgba(125, 211, 252, ${0.9 * t})`;
-      ctx.lineWidth = 4 * t + 1;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, ring, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = `rgba(224, 242, 254, ${0.16 * t})`;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, ring * 0.72, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
+  for (const effect of teleportEffects) drawTeleportMotion(effect);
 }
 
 function drawSukunaKingPassiveEffect(f) {
@@ -19663,64 +19738,6 @@ function drawSukunaKingPassiveEffect(f) {
   ctx.restore();
 }
 
-function drawGojoBluePunchEffect(f) {
-  if (!f || f.technique !== "limitless") return;
-  const active = isBluePunchActive(f);
-  const chargeRatio = Math.max(0, Math.min(1, (f.bluePunchHoldTicks || 0) / GOJO_BLUE_PUNCH_HOLD_TICKS));
-  const flash = Math.max(0, Math.min(1, (f.bluePunchFlash || 0) / 18));
-  if (!active && chargeRatio <= 0 && flash <= 0) return;
-
-  const center = getFighterCenter(f);
-  const activeRatio = Math.max(0, Math.min(1, (f.bluePunchActiveTicks || 0) / GOJO_BLUE_PUNCH_ACTIVE_TICKS));
-  const pulse = 1 + Math.sin(frame * 0.26) * 0.08;
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  if (active) {
-    const alpha = 0.25 + activeRatio * 0.38 + flash * 0.22;
-    ctx.strokeStyle = `rgba(125, 211, 252, ${alpha})`;
-    ctx.lineWidth = 4 + flash * 3;
-    ctx.setLineDash([18, 10]);
-    ctx.lineDashOffset = -frame * 1.2;
-    ctx.beginPath();
-    ctx.ellipse(center.x, center.y + 4, 48 * pulse, 72 * pulse, 0, -0.25, Math.PI * 1.25);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    for (const side of [-1, 1]) {
-      const fistX = center.x + side * (f.w * 0.42 + 9);
-      const fistY = f.y + 73 + Math.sin(frame * 0.18 + side) * 3;
-      const pullOffset = Math.sin(frame * 0.3 + side) * 6;
-      ctx.strokeStyle = `rgba(56, 189, 248, ${0.42 + flash * 0.3})`;
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.arc(fistX, fistY, 10 + pulse * 3, frame * 0.12, frame * 0.12 + Math.PI * 1.45);
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(224, 242, 254, ${0.34 + flash * 0.28})`;
-      ctx.beginPath();
-      ctx.moveTo(fistX + side * (24 + pullOffset), fistY - 8);
-      ctx.quadraticCurveTo(fistX + side * 8, fistY - 2, fistX, fistY);
-      ctx.moveTo(fistX + side * (22 - pullOffset * 0.5), fistY + 9);
-      ctx.quadraticCurveTo(fistX + side * 7, fistY + 3, fistX - side * 1, fistY);
-      ctx.stroke();
-    }
-  }
-
-  if (chargeRatio > 0 && !active) {
-    ctx.strokeStyle = `rgba(224, 242, 254, ${0.35 + chargeRatio * 0.45})`;
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y - 4, 34 + chargeRatio * 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * chargeRatio);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(56, 189, 248, ${0.08 + chargeRatio * 0.13})`;
-    ctx.beginPath();
-    ctx.ellipse(center.x, center.y + 8, 32 + chargeRatio * 20, 54 + chargeRatio * 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 function drawGojoPushPullEffect(f) {
   if (!f || (f.gojoPushPullTimer || 0) <= 0) return;
   const center = getFighterCenter(f);
@@ -19762,50 +19779,6 @@ function drawGojoPushPullEffect(f) {
   ctx.beginPath();
   ctx.arc(center.x + jitter * 0.6, center.y - 4, 4 + timerRatio * 4, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
-}
-
-function drawSukunaFugaChargeEffect(f) {
-  if (!f || f.technique !== "shrine" || !f.fugaAiming) return;
-  const center = getFighterCenter(f);
-  const chargeRatio = Math.max(0, Math.min(1, (f.fugaChargeTicks || 0) / getFugaRequiredChargeTicks(f)));
-  const pulse = 1 + Math.sin(frame * 0.28) * (0.05 + chargeRatio * 0.05);
-  const radius = 28 + chargeRatio * 34;
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = chargeRatio >= 1
-    ? "rgba(254, 240, 138, 0.92)"
-    : `rgba(251, 146, 60, ${0.35 + chargeRatio * 0.36})`;
-  ctx.lineWidth = 4 + chargeRatio * 4;
-  ctx.setLineDash(chargeRatio >= 1 ? [] : [14, 10]);
-  ctx.lineDashOffset = -frame * (0.8 + chargeRatio * 0.6);
-  ctx.beginPath();
-  ctx.arc(center.x, center.y - 6, radius * pulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.06, chargeRatio));
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  const glow = ctx.createRadialGradient(center.x, center.y - 4, 2, center.x, center.y - 4, 78 * pulse);
-  glow.addColorStop(0, `rgba(254, 240, 138, ${0.18 + chargeRatio * 0.24})`);
-  glow.addColorStop(0.48, `rgba(249, 115, 22, ${0.12 + chargeRatio * 0.2})`);
-  glow.addColorStop(1, "rgba(127, 29, 29, 0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y - 4, 78 * pulse, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = `rgba(127, 29, 29, ${0.42 + chargeRatio * 0.38})`;
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  for (let i = 0; i < 5; i += 1) {
-    const angle = frame * 0.05 + i * Math.PI * 0.4;
-    const inner = radius * (0.45 + chargeRatio * 0.25);
-    const outer = radius * (0.95 + chargeRatio * 0.55);
-    ctx.beginPath();
-    ctx.moveTo(center.x + Math.cos(angle) * inner, center.y - 6 + Math.sin(angle) * inner);
-    ctx.lineTo(center.x + Math.cos(angle + 0.28) * outer, center.y - 6 + Math.sin(angle + 0.28) * outer);
-    ctx.stroke();
-  }
   ctx.restore();
 }
 
@@ -19864,7 +19837,7 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
   const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
   const pose = options.pose || "idle";
   const hitFlash = Math.max(0, Math.min(1, options.hitFlash || 0));
-  const punch = Math.max(0, Math.min(1, options.punch || 0));
+  const punch = Math.max(-0.3, Math.min(1, options.punch || 0));
   const dir = options.dir || 1;
   const isRyuk = kind === "ryuk";
   const isMisa = kind === "misa";
@@ -19923,7 +19896,20 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
     ctx.fill();
   }
 
-  // fighter-identical arm rig (outline 13 / fill 8 / joint dots / hand)
+  if (isRyuk) {
+    ctx.strokeStyle = "#51465f";
+    ctx.lineWidth = 1.8;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(side * 14, -84);
+        ctx.quadraticCurveTo(side * (35 + i * 6), -94 + i * 4, side * (79 - i * 9), -51 + i * 5);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // The same connected arm rig serves idle, flight, punch and throw poses.
   const armRig = (shoulder, elbow, hand) => {
     const strokeArm = (strokeColor, width) => {
       ctx.strokeStyle = strokeColor;
@@ -19935,7 +19921,11 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
       ctx.stroke();
     };
     strokeArm("#020617", 13);
-    strokeArm(palette.body, 8);
+    strokeArm(materialGradient(palette.body, -24, -78, 42, -36), 9);
+    ctx.save();
+    ctx.translate(-1.5, -1.5);
+    strokeArm("rgba(234,239,255,0.18)", 1.4);
+    ctx.restore();
     // ARM_JOINT_PATCH: same as the fighters - no interior joint dots,
     // just the outlined hand cap under the skin-colored hand.
     ctx.fillStyle = "#020617";
@@ -20068,7 +20058,21 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
     ctx.fill();
   }
 
-  // head: fighter-identical skin ellipse with black outline, no face
+  if (isRyuk) {
+    ctx.fillStyle = "#2d2737";
+    ctx.strokeStyle = "#61566f"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-22, -83); ctx.lineTo(-26, -94); ctx.lineTo(-16, -90);
+    ctx.lineTo(-15, -101); ctx.lineTo(-7, -94); ctx.lineTo(0, -101);
+    ctx.lineTo(7, -94); ctx.lineTo(15, -101); ctx.lineTo(16, -90);
+    ctx.lineTo(26, -94); ctx.lineTo(22, -83); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#9d90ae";
+    ctx.beginPath(); ctx.roundRect(-18, -52, 36, 5, 2); ctx.fill();
+    ctx.fillStyle = "#332b43";
+    ctx.beginPath(); ctx.roundRect(-4, -54, 8, 9, 2); ctx.fill();
+  }
+
+  // A smooth shaded head, without eyes, a nose, or a mouth.
   const headBob = idleSway * 0.7;
   ctx.fillStyle = palette.skin;
   ctx.beginPath();
@@ -20136,23 +20140,30 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
     ctx.strokeStyle = palette.hairDark;
     ctx.lineWidth = 1.3;
     ctx.stroke();
-    // SUMMON_DUMMY_BODY_PATCH: Soichiro's mustache (facial hair is
-    // allowed - same rule as Thragg's), a dark grey bar low on the head.
-    ctx.fillStyle = palette.hairDark;
-    ctx.beginPath();
-    ctx.moveTo(-6.5, -94 + headBob);
-    ctx.quadraticCurveTo(0, -98 + headBob, 6.5, -94 + headBob);
-    ctx.quadraticCurveTo(0, -90 + headBob, -6.5, -94 + headBob);
-    ctx.closePath();
-    ctx.fill();
+
   }
 
   // front (right) arm on top - drives the Ryuk punch
+  const hand = options.hand || (isRyuk
+    ? { x: lerp(22, LIGHT_RYUK_REACH, punchDrive), y: lerp(-46, LIGHT_RYUK_HAND_Y, punchDrive) }
+    : { x: 17 + armSway, y: -42 });
   armRig(
     { x: 16, y: -72 },
-    { x: 22 + punchDrive * 14, y: -56 + punchDrive * 10 },
-    { x: 17 + armSway + punchDrive * 34, y: -42 + punchDrive * 12 }
+    { x: (16 + hand.x) * 0.5 + 7, y: (-72 + hand.y) * 0.5 + 12 },
+    hand
   );
+  if (isRyuk) {
+    // Knuckles stay connected to the wrist; there is no separate floating fist.
+    ctx.fillStyle = materialGradient(palette.skin, hand.x - 8, hand.y - 8, hand.x + 8, hand.y + 8);
+    ctx.strokeStyle = "#15121d";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(hand.x - 5, hand.y - 7, 14, 13, 4); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = "rgba(53,50,70,0.55)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath(); ctx.moveTo(hand.x + i * 3, hand.y - 5); ctx.lineTo(hand.x + i * 3, hand.y - 1); ctx.stroke();
+    }
+  }
 
   ctx.shadowBlur = 0;
   ctx.restore();
@@ -20208,24 +20219,69 @@ function drawLightSummonEffect(f) {
 
 // LIGHT_RYUK_COMPANION_PATCH: a persistent Ryuk shadow floating BEHIND
 // Light in every state (idle, walking, jumping). While the Shinigami Strike
-// projectile or the punch assist is drawing Ryuk elsewhere, we skip this
-// idle companion so there aren't two Ryuks.
-function drawLightRyukCompanion(f) {
-  if (!isLight(f) || f.ko || f.lying) return;
-  // Skip if there's an active Shinigami Strike from Light on the field.
-  for (const p of projectiles) {
-    if (p.move === "ryukStrike" && p.owner === (f === player ? "player" : "enemy")) return;
+// projectile is drawing Ryuk elsewhere, we skip this companion. Melee
+// attacks animate this same companion so there is only one Ryuk.
+function getLightMeleeRyukPose(f) {
+  const home = getLightRyukHome(f);
+  const attack = getAttackSpec(f);
+  if (!attack || !["light", "heavy", "backThrow"].includes(f.attacking)) return { ...home, dir: f.dir, hand: null };
+  const windup = clamp01(f.attackFrame / Math.max(1, attack.windup));
+  const recovery = clamp01((f.attackFrame - attack.windup - attack.active) / Math.max(1, attack.recovery));
+  const drive = f.attackFrame < attack.windup ? easeOutQuad(windup) : 1 - easeOutQuad(recovery);
+  const hitbox = getHitbox(f);
+  const scale = LIGHT_RYUK_SCALE * 1.3;
+  const contact = { x: hitbox.x + hitbox.w * 0.5, y: hitbox.y + hitbox.h * 0.5 };
+  let dir = f.dir || 1;
+  const x = lerp(home.x, contact.x - dir * LIGHT_RYUK_REACH * scale, drive);
+  const y = lerp(home.y, contact.y - LIGHT_RYUK_HAND_Y * scale, drive);
+  let hand = { x: lerp(22, LIGHT_RYUK_REACH, drive), y: lerp(-46, LIGHT_RYUK_HAND_Y, drive) };
+  if (f.attacking === "backThrow" && f.attackFrame >= attack.windup) {
+    // The same attached arm follows the lift and over-shoulder release.
+    const swing = clamp01((f.attackFrame - attack.windup) / (attack.active + 8));
+    hand = { x: lerp(LIGHT_RYUK_REACH, -38, swing), y: LIGHT_RYUK_HAND_Y - Math.sin(swing * Math.PI) * 60 };
   }
-  // Skip during Light's own light/heavy punches (drawRyukPunchAssist handles Ryuk).
-  if (f.attacking === "light" || f.attacking === "heavy") return;
-  const dir = f.dir || 1;
-  const cx = f.x + f.w / 2;
-  // Ryuk stands one body-width behind Light and floats slightly off the ground.
-  const bx = cx - dir * 62;
-  const by = f.y + f.h - 4 + Math.sin(frame * 0.06) * 3; // gentle float
+  return { x, y, dir, hand };
+}
+
+function drawLightRyukCompanion(f) {
+  if (!isLight(f) || f.ko || f.lying || getActiveRyukStrike(f)) return;
+  const pose = getLightMeleeRyukPose(f);
+  drawDeathNoteCharacterModel("ryuk", pose.x, pose.y, LIGHT_RYUK_SCALE, {
+    dir: pose.dir, hand: pose.hand, alpha: 0.96
+  });
+}
+
+function drawRyukStrike(p) {
+  const pose = getRyukStrikePose(p);
   ctx.save();
-  ctx.globalAlpha = 0.9;
-  drawDeathNoteCharacterModel("ryuk", bx, by, 0.92, { alpha: 1, dir });
+  ctx.translate(-p.x, -p.y);
+  const travelling = p.age < p.travelTicks || p.age >= p.startupMax + p.activeTicks + p.recoveryTicks;
+  if (travelling) {
+    const returning = p.age >= p.startupMax + p.activeTicks + p.recoveryTicks;
+    const dx = returning ? p.startX - p.bodyX : p.bodyX - p.startX;
+    const dy = returning ? p.startY - p.bodyY : p.bodyY - p.startY;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    ctx.lineCap = "round";
+    for (let i = 0; i < 5; i++) {
+      const offset = (i - 2) * 16;
+      const tail = 26 + (i % 3) * 22;
+      ctx.strokeStyle = i % 2 ? "rgba(224,213,247,0.55)" : "rgba(57,42,82,0.65)";
+      ctx.lineWidth = i % 2 ? 2 : 4;
+      ctx.beginPath();
+      ctx.moveTo(pose.x - dx / length * tail, pose.y - 84 + offset - dy / length * tail);
+      ctx.lineTo(pose.x - dx / length * 14, pose.y - 84 + offset - dy / length * 14);
+      ctx.stroke();
+    }
+  }
+  drawDeathNoteCharacterModel("ryuk", pose.x, pose.y, LIGHT_RYUK_SCALE, { dir: pose.dir, hand: pose.hand, flight: travelling });
+  if (p.age >= p.startupMax && p.age < p.startupMax + p.activeTicks + 5) {
+    const t = clamp01((p.age - p.startupMax) / (p.activeTicks + 5));
+    ctx.strokeStyle = `rgba(231,219,255,${(1-t)*0.8})`;
+    ctx.lineWidth = 3 * (1-t) + 0.5;
+    ctx.beginPath();
+    ctx.ellipse(p.x + p.dir * t * 10, p.y, 8 + t * 18, 15 + t * 26, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -20509,77 +20565,6 @@ function drawFighterBacklight(f) {
   ctx.restore();
 }
 
-function drawRyukPunchAssist(f, attack, active) {
-  if (!isLight(f) || !attack || (f.attacking !== "light" && f.attacking !== "heavy")) return;
-
-  // LIGHT_RYUK_BEHIND_PATCH: Ryuk now stands BEHIND Light (in the -x
-  // direction of Light's local space) and reaches OVER/PAST him to throw the
-  // punch. He's the one striking - not Light. During active frames his fist
-  // extends forward past Light's body to the strike point.
-  const heavy = f.attacking === "heavy";
-  const total = Math.max(1, attack.windup + attack.active + attack.recovery);
-  const progress = Math.max(0, Math.min(1, f.attackFrame / total));
-  const windupRatio = Math.max(0, Math.min(1, f.attackFrame / Math.max(1, attack.windup)));
-  const activeRatio = active
-    ? Math.max(0, Math.min(1, (f.attackFrame - attack.windup) / Math.max(1, attack.active)))
-    : 0;
-  const fadeOut = f.attackFrame > attack.windup + attack.active
-    ? 1 - Math.max(0, Math.min(1, (f.attackFrame - attack.windup - attack.active) / Math.max(1, attack.recovery)))
-    : 1;
-  const alpha = Math.max(0, Math.min(1, Math.min(1, windupRatio * 1.25) * fadeOut));
-  // Ryuk stands one body-width BEHIND Light (-x in local space)
-  const ryukX = -(heavy ? 42 : 36);
-  const ryukY = 128; // ground-level foot
-  const strikeX = f.w + (heavy ? 44 : 34); // hitbox forward of Light
-  const strikeY = heavy ? 56 : 50;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.globalCompositeOperation = "source-over";
-
-  // Ryuk himself, drawn BEHIND Light. During windup he raises his arm
-  // over Light's shoulder; on active he punches forward past Light.
-  drawDeathNoteCharacterModel("ryuk", ryukX, ryukY, heavy ? 1.15 : 1.02, {
-    alpha: 1,
-    pose: "punch",
-    punch: active ? 1 : windupRatio * 0.7
-  });
-
-  // Big black shadow-fist reaching from Ryuk over Light's shoulder to the
-  // strike point. On windup the fist is cocked at Ryuk's side; on active
-  // it snaps forward through Light to the hit zone.
-  const fistProgress = active ? activeRatio : Math.min(1, windupRatio * 0.4);
-  const fistX = ryukX + (strikeX - ryukX) * fistProgress;
-  const fistY = ryukY - 46 + (strikeY - (ryukY - 46)) * fistProgress;
-  const armStart = { x: ryukX + 6, y: ryukY - 60 };
-  ctx.strokeStyle = `rgba(0, 0, 0, ${0.7 * alpha})`;
-  ctx.lineWidth = heavy ? 12 : 9;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(armStart.x, armStart.y);
-  ctx.lineTo(fistX, fistY);
-  ctx.stroke();
-  // fist
-  ctx.fillStyle = `rgba(15, 5, 22, ${0.9 * alpha})`;
-  ctx.beginPath();
-  ctx.arc(fistX, fistY, heavy ? 12 : 9, 0, Math.PI * 2);
-  ctx.fill();
-  // dark motion swirl at the strike point during active
-  if (active) {
-    ctx.fillStyle = `rgba(0,0,0,${0.16 + activeRatio * 0.22})`;
-    for (let i = 0; i < 7; i += 1) {
-      const a = frame * 0.08 + i * 0.9;
-      ctx.beginPath();
-      ctx.arc(strikeX + Math.cos(a) * (20 + i * 1.8), strikeY + Math.sin(a) * (10 + i), 4 + (i % 3), 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  ctx.restore();
-}
-
-
-// THRAGG_FLIGHT_POSE_PATCH: white speed-line trail while Thragg flies.
 function drawThraggFlightEffect(f) {
   if ((f?.thraggFlightTicks || 0) <= 0) return;
   const c = getFighterCenter(f);
@@ -20969,6 +20954,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.restore();
     return;
   }
+  const motion = getFighterMotion(f);
+  const punchMotion = !isLight(f) && !isSanji(f) && !isZealot(f) ? getPunchMotion(f) : null;
   const flash = f.hurt > 0 && Math.floor(frame / 3) % 2 === 0;
   const dodgeAlpha = f.dodging > 0 ? 0.48 : 1;
   const running = !f.ko && f.grounded && Math.abs(f.vx) > 0.65 && !f.blocking && f.stun <= 0 && f.dodging <= 0;
@@ -20994,7 +20981,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   const armSwing = walkStride;
   const runPose = walkStride;
   const runCenterLift = running ? Math.abs(Math.sin(gaitPhase)) * (backpedal ? 2.2 : 3) : 0;
-  const bob = running ? (backpedal ? 0.8 : 1) + runCenterLift * 0.45 : 0;
+  const bob = motion.bob;
   const jumpPose = !f.grounded && !f.ko;
   const jumpRetreating = jumpPose && Math.sign(f.vx) === -f.dir;
   const jumpCycle = jumpPose ? Math.sin(frame * 0.32) : 0;
@@ -21010,9 +20997,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   drawLightSummonEffect(f);
   drawBindingVowEffect(f);
   drawSimpleDomainEffect(f);
-  drawGojoBluePunchEffect(f);
+  // Blue-infused energy is rendered on the actual arm-rig hands below.
   drawGojoPushPullEffect(f);
-  drawSukunaFugaChargeEffect(f);
+  // Fuga charge is drawn as an attached bow by the cast arm rig.
   drawThraggFlightEffect(f);
   ctx.save();
   ctx.globalAlpha = dodgeAlpha;
@@ -21025,7 +21012,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   // DAVID_PATCH: the Cyber Skeleton makes him tower - scaled about his feet.
   const davidMech = davidUltActive(f) && !f.ko && !f.lying;
   const bulkX = f.technique === "brawler" ? 1.16 : davidMech ? 1.22 : 1;
-  const bulkY = f.technique === "brawler" ? 1.1 : davidMech ? 1.5 : 1;
+  const bulkY = (f.technique === "brawler" ? 1.1 : davidMech ? 1.5 : 1) * (1 - motion.squash);
   // ZEALOT_WHIRL_SPIN_PATCH v2: real full-body spin. Two effects layer:
   //   - horizontal scale sweeps through zero (edge-on flip) so the sprite
   //     reads as rotating about its vertical axis (a 2D pirouette trick).
@@ -21060,79 +21047,13 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   if (davidUltActive(f) && !f.ko && !f.lying) drawDavidCyberSkeleton(f);
 
   const hipY = 74;
-  const kneeY = jumpPose ? 104 : 101;
+  const kneeY = 101;
   const footY = 124;
-  const leftHip = { x: 18, y: hipY };
-  const rightHip = { x: 34, y: hipY };
+  const leftHip = { x: 18, y: hipY }, rightHip = { x: 34, y: hipY };
   const risingJump = jumpPose && f.vy < -0.3;
   const fallingJump = jumpPose && !risingJump;
-  const leftKnee = jumpPose
-    ? { x: fallingJump ? 20 : 21, y: fallingJump ? 96 : 95 }
-    : { x: 16, y: kneeY };
-  const rightKnee = risingJump
-    ? { x: 61, y: 77 }
-    : jumpPose
-      ? { x: 60, y: 79 }
-      : { x: 36, y: kneeY };
-  const leftFoot = jumpPose
-    ? { x: fallingJump ? -10 : -11, y: fallingJump ? 98 : 96 }
-    : { x: 14, y: footY };
-  const rightFoot = risingJump
-    ? { x: 61, y: 114 }
-    : jumpPose
-      ? { x: 60, y: 115 }
-      : { x: 39, y: footY };
-  if (running && !jumpPose) {
-    const swingWave = Math.sin(gaitPhase);
-    let strideCurve, strideLen, leftLift, rightLift, kneeBend, kneeYDrop, kneeXBias, kneeLiftPull;
-    if (backpedal) {
-      // BACKPEDAL_GAIT_PATCH: a distinct backward-walk, not the forward
-      // cycle scaled down. Short choppy steps (eased stride curve so the
-      // foot plants quickly and dwells), knees carried higher and bent
-      // harder (the cautious can't-see-where-I'm-stepping gait), and the
-      // swing foot travels toward -x, the direction of travel - so the
-      // lift phase here is the mirror of the forward path's.
-      strideCurve = Math.sign(walkStride) * Math.pow(Math.abs(walkStride), 0.72);
-      strideLen = 5.5;
-      leftLift = Math.max(0, swingWave) * 4.4;
-      rightLift = Math.max(0, -swingWave) * 4.4;
-      kneeBend = 6.6 + Math.abs(swingWave) * 2.2;
-      kneeYDrop = 6.2;
-      kneeXBias = -1.6;
-      kneeLiftPull = 0.55;
-    } else {
-      // Forward walk. The lifted (swing) foot must be the one traveling
-      // toward +x relative to the body while the planted foot slides back.
-      // NO_LEG_CROSS_PATCH: stride stays under 8 (half the 16px hip gap)
-      // so the rear leg never overtakes the front leg - crossing made the
-      // flat 2D legs visually swap and the arm pairing read wrong.
-      strideCurve = Math.max(-1, Math.min(1, walkStride));
-      strideLen = gojoWalk ? 7 : 7.5;
-      leftLift = Math.max(0, -swingWave) * 2.6;
-      rightLift = Math.max(0, swingWave) * 2.6;
-      kneeBend = 4.4 + Math.abs(swingWave) * 1.1;
-      kneeYDrop = 8.5;
-      kneeXBias = 0;
-      kneeLiftPull = 0.25;
-    }
-    leftFoot.x = 18 - strideCurve * strideLen;
-    rightFoot.x = 34 + strideCurve * strideLen;
-    leftFoot.y = footY - leftLift;
-    rightFoot.y = footY - rightLift;
-
-    const leftKneeDir = leftFoot.x >= leftHip.x ? 1 : -1;
-    const rightKneeDir = rightFoot.x >= rightHip.x ? 1 : -1;
-    leftKnee.x = Math.max(
-      Math.min(leftHip.x, leftFoot.x) - 5,
-      Math.min(Math.max(leftHip.x, leftFoot.x) + 5, (leftHip.x + leftFoot.x) * 0.5 + leftKneeDir * kneeBend + kneeXBias)
-    );
-    rightKnee.x = Math.max(
-      Math.min(rightHip.x, rightFoot.x) - 5,
-      Math.min(Math.max(rightHip.x, rightFoot.x) + 5, (rightHip.x + rightFoot.x) * 0.5 + rightKneeDir * kneeBend + kneeXBias)
-    );
-    leftKnee.y = (leftHip.y + leftFoot.y) * 0.5 + kneeYDrop - leftLift * kneeLiftPull;
-    rightKnee.y = (rightHip.y + rightFoot.y) * 0.5 + kneeYDrop - rightLift * kneeLiftPull;
-  }
+  const leftKnee = { ...motion.leftKnee }, rightKnee = { ...motion.rightKnee };
+  const leftFoot = { ...motion.leftFoot }, rightFoot = { ...motion.rightFoot };
   if ((f.thraggFlightTicks || 0) > 0 && jumpPose) {
     // THRAGG_FLIGHT_POSE_PATCH: superman carriage - both legs sweep back
     // and trail behind him instead of the generic jump tuck.
@@ -21234,7 +21155,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   ctx.lineTo(rightAnkle.x, rightAnkle.y);
   ctx.stroke();
 
-  ctx.strokeStyle = pantsColor;
+  ctx.strokeStyle = materialGradient(pantsColor, 8, 72, 43, 126);
   ctx.lineWidth = 11;
   ctx.beginPath();
   ctx.moveTo(leftHip.x, leftHip.y);
@@ -21249,6 +21170,10 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   // toward +x, the facing direction) instead of a flat line the leg
   // could poke through.
   const drawBoot = (foot) => {
+    ctx.save();
+    ctx.translate(foot.x, foot.y - 6);
+    ctx.rotate(foot.roll || 0);
+    ctx.translate(-foot.x, -foot.y + 6);
     ctx.fillStyle = "#020617";
     ctx.beginPath();
     ctx.roundRect(foot.x - 10, foot.y - 9, 24, 13, 5);
@@ -21257,6 +21182,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.beginPath();
     ctx.roundRect(foot.x - 7.5, foot.y - 6.5, 19, 8.5, 3.5);
     ctx.fill();
+    ctx.restore();
   };
   drawBoot(leftFoot);
   drawBoot(rightFoot);
@@ -21290,12 +21216,11 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     }
   }
 
-  // BACKPEDAL torso: shifted and rotated slightly BACK (positive), the
-  // opposite of the forward walk's forward lean.
-  const lean = f.attacking ? -7 : f.blocking ? 4 : jumpRetreating ? 4 : jumpPose ? -2 : backpedal ? 4.5 : gojoWalk ? -3 + runPose * 0.4 : running ? -5 : f.technique === "shrine" ? -4 : -2;
+  const lean = punchMotion ? punchMotion.drive * 3 - punchMotion.load * 2 : f.blocking ? -2 : 0;
   ctx.save();
-  ctx.translate(lean, 0);
-  ctx.rotate((f.technique === "shrine" ? -0.04 : -0.025) + idle * 0.01 + (backpedal ? 0.06 : 0));
+  ctx.translate(26 + lean, 74);
+  ctx.rotate(motion.tilt + (punchMotion?.tilt || 0) + idle * 0.008);
+  ctx.translate(-26, -74);
 
   ctx.fillStyle = "#020617";
   ctx.beginPath();
@@ -21307,7 +21232,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   ctx.lineTo(8, 43);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = bodyColor;
+  ctx.fillStyle = materialGradient(bodyColor, 10, 36, 45, 82);
   ctx.beginPath();
   ctx.moveTo(15, 36);
   ctx.lineTo(41, 38);
@@ -22098,10 +22023,11 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   }
   // SKINS_PATCH: alternate outfits drawn over the default torso.
   if (f && !f.ko) drawSkinOutfitOverlay(f, skinColor);
+  drawOutfitFinishing(f, skin);
   // HEAD_OUTLINE_PATCH: every head gets the same black outline the limbs
   // and torso already have - previously bare on the dummy and Light, whose
   // hair doesn't wrap the whole head.
-  ctx.fillStyle = skinColor;
+  ctx.fillStyle = materialGradient(skinColor, 14, 12, 39, 37);
   ctx.beginPath();
   ctx.ellipse(26, 23, 13, 15, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -22298,8 +22224,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.fill();
   } else if (f.technique === "blackleg") {
     // SANJI_PATCH: sleek blond hair with the long fringe sweeping down
-    // over the leading side of the face (his hidden-eye side), plus the
-    // chin stubble. Hair silhouette only - no facial features.
+    // over the leading side of the face, with his signature curly eyebrow.
     const hairSway = idle * 0.5;
     ctx.fillStyle = skin.hair;
     ctx.beginPath();
@@ -22323,47 +22248,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.moveTo(18, 10.5);
     ctx.quadraticCurveTo(26, 8.5, 33, 11);
     ctx.stroke();
-    // SANJI_EYEBROW_PATCH: the trademark curly-swirl brow on the visible
-    // (non-fringe) side of the face - drawn as an actual multi-loop spiral
-    // so it reads unmistakably like Sanji at any size. No eye beneath it,
-    // matching the no-facial-features rule.
-    ctx.strokeStyle = skin.hair;
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    // straight brow bar sweeping in from the temple
-    ctx.moveTo(14.5, 19.6);
-    ctx.quadraticCurveTo(18, 17.6, 22, 18.2);
-    // then a fat outer loop that curls back on itself twice - the classic
-    // Vinsmoke swirl. Traced as a shrinking parametric spiral.
-    const cxSw = 24.4, cySw = 20.0;
-    const loops = 2.4;
-    const steps = 26;
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const ang = t * loops * Math.PI * 2;
-      const r = 3.4 * (1 - t) + 0.4;
-      ctx.lineTo(cxSw + Math.cos(ang) * r, cySw + Math.sin(ang) * r);
-    }
-    ctx.stroke();
-    // small dark accent inside the swirl so it stays legible when zoomed out
-    ctx.strokeStyle = "rgba(120, 84, 20, 0.75)";
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    ctx.moveTo(15.2, 19.5); ctx.quadraticCurveTo(18.4, 17.9, 22, 18.4);
-    ctx.stroke();
-    // chin stubble - a light scratchy patch, not a mouth
-    ctx.strokeStyle = "rgba(120, 90, 40, 0.6)";
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(22.5, 34.5);
-    ctx.lineTo(24, 36.2);
-    ctx.moveTo(25.5, 35);
-    ctx.lineTo(27, 36.8);
-    ctx.moveTo(28.5, 34.6);
-    ctx.lineTo(30, 36.2);
-    ctx.stroke();
+    drawSanjiEyebrow();
     // SANJI_SKIN_CANON_PATCH: Wano yukata canon has the hair tied back in a
     // small topknot; the Onigashima Raid Suit adds the black hood/cowl
     // framing the head with the collar clasp.
@@ -22427,32 +22312,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     // over the scalp. No eyes/mouth/nose, just carved bone-and-sinew.
     // SKINS_CANON_PATCH: the season4 skin keeps the gaunt carving but the
     // palette already shifts it beige, so nothing extra needed here.
-    // sunken temple + cheek hollows
-    ctx.fillStyle = "rgba(38, 16, 14, 0.5)";
-    ctx.beginPath();
-    ctx.ellipse(18, 20, 3.5, 5, 0.3, 0, Math.PI * 2); // temple L
-    ctx.ellipse(34, 20, 3.5, 5, -0.3, 0, Math.PI * 2); // temple R
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(19, 30, 3, 4, 0.2, 0, Math.PI * 2); // cheek hollow L
-    ctx.ellipse(33, 30, 3, 4, -0.2, 0, Math.PI * 2); // cheek hollow R
-    ctx.fill();
-    // deep brow-ridge shadow (a ridge, not eyes)
-    ctx.strokeStyle = "rgba(28, 12, 10, 0.75)";
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(16, 22);
-    ctx.quadraticCurveTo(26, 18.5, 36, 22);
-    ctx.stroke();
-    // gaunt highlight along the brow and cheekbones
-    ctx.strokeStyle = "rgba(180, 120, 108, 0.4)";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(17, 20); ctx.quadraticCurveTo(26, 17, 35, 20);
-    ctx.moveTo(21, 26); ctx.quadraticCurveTo(24, 28, 22, 31);
-    ctx.moveTo(31, 26); ctx.quadraticCurveTo(28, 28, 30, 31);
-    ctx.stroke();
     // vine ridges over the scalp
     ctx.strokeStyle = "#160a09";
     ctx.lineWidth = 2.2;
@@ -22462,12 +22321,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.quadraticCurveTo(30, 9, 34, 16);
     ctx.moveTo(23, 14);
     ctx.quadraticCurveTo(26, 10, 29, 14);
-    ctx.stroke();
-    // gnarled chin/jaw line
-    ctx.strokeStyle = "rgba(28, 12, 10, 0.6)";
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(21, 34); ctx.quadraticCurveTo(26, 37, 31, 34);
     ctx.stroke();
   } else if (f.technique === "spider") {
     // SPIDER_PATCH: the full red mask - black web lines radiating from the
@@ -22530,28 +22383,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       ctx.lineTo(45, 26);
       ctx.quadraticCurveTo(37, 20, 27, 22); ctx.quadraticCurveTo(17, 20, 9, 26);
       ctx.closePath(); ctx.fill();
-    }
-    // eyebrows (small, if not Ako - Ako gets the makeup brows drawn below)
-    if (!isAkoSkin) {
-      ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(17, 22); ctx.quadraticCurveTo(21, 20.5, 24, 22);
-      ctx.moveTo(29, 22); ctx.quadraticCurveTo(32, 20.5, 36, 22);
-      ctx.stroke();
-    }
-    if (isAkoSkin) {
-      // kabuki-white face already via palette. Add red cheek circles + tiny
-      // rosebud lip patch (a marking, not a mouth) + delicate red brows.
-      ctx.fillStyle = "rgba(224, 80, 90, 0.85)";
-      ctx.beginPath(); ctx.arc(15, 26, 3.2, 0, Math.PI * 2); ctx.arc(39, 26, 3.2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#c1121f";
-      ctx.beginPath(); ctx.ellipse(27, 32, 1.6, 1.2, 0, 0, Math.PI * 2); ctx.fill();
-      // painted brows
-      ctx.strokeStyle = "#c1121f"; ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(17, 21); ctx.quadraticCurveTo(21, 19, 24, 21);
-      ctx.moveTo(30, 21); ctx.quadraticCurveTo(33, 19, 37, 21);
-      ctx.stroke();
     }
   } else if (f.technique === "beast") {
     // INOSUKE_PATCH: the boar-head mask worn over the head (a headpiece,
@@ -22940,70 +22771,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       ctx.moveTo(17, 14); ctx.quadraticCurveTo(20, 8, 25, 9);
       ctx.moveTo(28, 9); ctx.quadraticCurveTo(33, 9, 37, 15);
       ctx.stroke();
-      // dark bands over the eyes (the Evil Eye's mask-like shading)
-      ctx.fillStyle = "rgba(60, 30, 96, 0.85)";
-      ctx.beginPath();
-      ctx.moveTo(15, 20); ctx.quadraticCurveTo(20, 17, 25, 20); ctx.quadraticCurveTo(20, 24, 15, 22); ctx.closePath();
-      ctx.moveTo(37, 20); ctx.quadraticCurveTo(32, 17, 27, 20); ctx.quadraticCurveTo(32, 24, 37, 22); ctx.closePath();
-      ctx.fill();
-      // glowing purple eyes
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      const eyePulse = 0.7 + Math.sin(frame * 0.28) * 0.2;
-      ctx.globalAlpha = eyePulse;
-      ctx.fillStyle = "#b026ff";
-      ctx.beginPath();
-      ctx.arc(20, 21, 2.4, 0, Math.PI * 2);
-      ctx.arc(32, 21, 2.4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = "#e9d5ff";
-      ctx.beginPath();
-      ctx.arc(20, 21, 1, 0, Math.PI * 2);
-      ctx.arc(32, 21, 1, 0, Math.PI * 2);
-      ctx.fill();
-      // menacing grin
-      ctx.strokeStyle = "#3a1e50";
-      ctx.lineWidth = 1.8;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(19, 30); ctx.quadraticCurveTo(26, 36, 33, 30);
-      ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(21, 31); ctx.lineTo(22, 33);
-      ctx.moveTo(26, 32.5); ctx.lineTo(26, 34.5);
-      ctx.moveTo(31, 31); ctx.lineTo(30, 33);
-      ctx.stroke();
-      // big glowing purple THIRD EYE on the forehead - concentric rings
-      const teY = 13;
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      const tePulse = 0.6 + Math.sin(frame * 0.25) * 0.3;
-      const teGlow = ctx.createRadialGradient(26, teY, 0.5, 26, teY, 14);
-      teGlow.addColorStop(0, `rgba(240, 200, 255, ${tePulse})`);
-      teGlow.addColorStop(0.4, `rgba(176, 38, 255, ${tePulse})`);
-      teGlow.addColorStop(1, "rgba(120, 20, 200, 0)");
-      ctx.fillStyle = teGlow;
-      ctx.beginPath();
-      ctx.arc(26, teY, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      // filled purple eye body
-      ctx.fillStyle = "#7e22ce";
-      ctx.beginPath();
-      ctx.ellipse(26, teY, 5.6, 8.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // the vertical eye + concentric ripple rings
-      ctx.strokeStyle = "#e9b8ff";
-      ctx.lineWidth = 1.2;
-      for (let r = 3; r <= 8; r += 2) {
-        ctx.globalAlpha = 0.95 - r * 0.09;
-        ctx.beginPath();
-        ctx.ellipse(26, teY, r * 0.68, r, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
+      // The transformed form keeps its pale hair and earrings with a blank face.
       // bright vertical slit pupil
       ctx.fillStyle = "#fbe8ff";
       ctx.beginPath();
@@ -23030,30 +22798,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       });
     }
   } else if (f.technique === "gardener") {
-    // DAVE_PATCH: the big brown beard (a hair silhouette, not a face) and
-    // his famous saucepan helmet with the handle out the back.
-    const sway = idle * 0.4;
+    // Retain the saucepan and side hair around a blank face.
     ctx.fillStyle = skin.hair;
-    ctx.beginPath();
-    ctx.moveTo(13, 22);
-    ctx.quadraticCurveTo(12, 38, 20, 44 + sway);
-    ctx.quadraticCurveTo(26, 48 + sway, 32, 44 + sway);
-    ctx.quadraticCurveTo(40, 38, 39, 22);
-    ctx.quadraticCurveTo(38, 30, 34, 32);
-    ctx.quadraticCurveTo(30, 34, 26, 34);
-    ctx.quadraticCurveTo(22, 34, 18, 32);
-    ctx.quadraticCurveTo(14, 30, 13, 22);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = "#3f2b16";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    // mustache resting on the beard + wild side tufts
-    ctx.fillStyle = skin.hair;
-    ctx.beginPath();
-    ctx.ellipse(20, 30, 6, 2.6, 0.25, 0, Math.PI * 2);
-    ctx.ellipse(32, 30, 6, 2.6, -0.25, 0, Math.PI * 2);
-    ctx.fill();
     ctx.beginPath();
     ctx.ellipse(12, 20, 4, 6, 0.3, 0, Math.PI * 2);
     ctx.ellipse(40, 20, 4, 6, -0.3, 0, Math.PI * 2);
@@ -23109,21 +22855,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.moveTo(20, 13); ctx.quadraticCurveTo(24, 9, 28, 12);
     ctx.moveTo(30, 12); ctx.quadraticCurveTo(34, 12, 37, 17);
     ctx.stroke();
-    // SKINS_PATCH: Corporate Drone Akira has huge dark eye-bag shadows -
-    // no eyes drawn (house style), just the sleep-deprived under-eye shading.
-    if (isCorpAkira(f)) {
-      ctx.fillStyle = "rgba(30, 15, 32, 0.65)";
-      ctx.beginPath();
-      ctx.ellipse(20, 25, 4.5, 2.4, 0.15, 0, Math.PI * 2);
-      ctx.ellipse(32, 25, 4.5, 2.4, -0.15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(30, 15, 32, 0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(15, 28); ctx.quadraticCurveTo(20, 30, 25, 28);
-      ctx.moveTo(27, 28); ctx.quadraticCurveTo(32, 30, 37, 28);
-      ctx.stroke();
-    }
   } else if (f.technique === "david") {
     // DAVID_PATCH: dark-brown hair, spiked up and swept back off the forehead
     // with tapered sides (his Edgerunners cut). Clean face - no brows.
@@ -23166,18 +22897,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.moveTo(15, 20); ctx.lineTo(16, 27);
     ctx.moveTo(37, 20); ctx.lineTo(36, 27);
     ctx.stroke();
-    // glowing red eye markings only during Cyberpsychosis
-    if (psycho) {
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = "#ff2d2d";
-      ctx.beginPath();
-      ctx.arc(21, 22, 1.8, 0, Math.PI * 2);
-      ctx.arc(31, 22, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+
   }
   ctx.restore();
 
@@ -23211,9 +22931,11 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     // SKINS_PATCH: Shibuya's jacket sleeves are chunkier than a bare arm - the
     // outline widens with the sleeve so it stays crisp at the thicker width.
     const outlineW = shibuyaSleeve && f.technique === "shrine" ? 15 : 13;
-    const fillW    = shibuyaSleeve && f.technique === "shrine" ? 11 : 8;
+    const fillW    = shibuyaSleeve && f.technique === "shrine" ? 11 : 9.5;
     if (useOutline) strokeArm("#020617", outlineW);
-    strokeArm(color, fillW);
+    strokeArm(materialGradient(color, shoulder.x - 8, shoulder.y, hand.x + 8, hand.y), fillW);
+    ctx.save(); ctx.translate(-1.5, -1.5);
+    strokeArm("rgba(241,245,255,0.13)", 1.2); ctx.restore();
     if (isShrineArm) {
       // SUKUNA_ARM_BAND_PATCH: two solid tattoo rings around each upper
       // arm (drawn perpendicular to the shoulder-elbow segment), matching
@@ -23250,6 +22972,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     ctx.beginPath();
     ctx.ellipse(hand.x - 1, hand.y - 1, 4.8, 3.8, 0, 0, Math.PI * 2);
     ctx.fill();
+    drawGojoHandEnergy(f, hand);
     if (isShrineArm) {
       ctx.strokeStyle = "rgba(127, 29, 29, 0.55)";
       ctx.lineWidth = 1.3;
@@ -23264,7 +22987,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     drawArmRig({ x: 41, y: 48 }, { x: 54, y: 49 }, { x: 57, y: 61 });
     drawArmRig({ x: 12, y: 50 }, { x: 23, y: 58 }, { x: 30, y: 52 });
   }
-  if (f.technique === "shrine" && !shibuyaSleeve && !f.attacking && !jumpPose && !f.blocking) {
+  if (f.technique === "shrine" && !shibuyaSleeve && !f.attacking && !jumpPose && !f.blocking && motion.blend < 0.02 && !getSorcererCast(f)) {
     const lowerBreath = running ? runCenterLift * 0.12 : idle * 2;
     const lowerSwing = running ? armSwing * (backpedal ? 1.1 : 8) : idle * 1.2; // EQUAL_ARM_PATCH: same backpedal sway as the upper pair
     drawArmRig(
@@ -23280,7 +23003,11 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       skinColor
     );
   }
-  if (f.attacking && isSanji(f) && f.attacking !== "backThrow") {
+  if (drawSorcererCastArms(f, drawArmRig, skin)) {
+    // Cast poses own the arms through charging and follow-through.
+  } else if (isLight(f) && (f.attacking || f.potatoEatingTicks > 0 || f.ultimateMove === "deathNote")) {
+    drawLightHandAction(f, drawArmRig, skin);
+  } else if (f.attacking && isSanji(f) && f.attacking !== "backThrow") {
     // SANJI_PATCH: he never punches - while kicking, both hands stay up
     // in a loose boxing-style guard (pockets are for after the fight).
     const guardBob = Math.sin(frame * 0.35) * 1.2;
@@ -23376,24 +23103,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
         );
       }
     } else {
-    if (isLight(f)) {
-      // LIGHT_NO_ARM_PUNCH_PATCH:
-      // Light doesn't throw the punch himself - Ryuk does - but he should
-      // still read as directing the strike instead of standing there idle.
-      const lightIdleArm = running ? armSwing * 1.4 : idle * 0.75;
-      const lightPunchCue = active ? 1 : windup ? 0.45 : 0.12;
-      drawArmRig(
-        { x: 42, y: 52 - lightPunchCue * 4 },
-        { x: 51 + lightIdleArm * 0.18 + lightPunchCue * 9, y: 61 - lightPunchCue * 11 },
-        { x: 49 + lightIdleArm * 0.35 + lightPunchCue * 15, y: 56 - lightPunchCue * 19 }
-      );
-      drawArmRig(
-        { x: 11, y: 52 },
-        { x: 5 - lightIdleArm * 0.18, y: 68 },
-        { x: 10 - lightIdleArm * 0.35, y: 82 }
-      );
-      drawRyukPunchAssist(f, attack, active);
-    } else {
     const heavy = f.attacking === "heavy";
     // PUNCH_SMOOTHING_PATCH: interpolate through windup/active/recovery
     // instead of snapping between 3 fixed poses each phase - the instant
@@ -23442,26 +23151,16 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
         heavy ? { x: 84, y: 82 } : { x: 74, y: 74 },   // active: blade past the hip
         heavy ? { x: 58, y: 74 } : { x: 56, y: 70 }    // recovery
       );
+    } else if (punchMotion) {
+      shoulder = punchMotion.shoulder;
+      elbow = punchMotion.elbow;
+      fist = punchMotion.fist;
     } else {
-      shoulder = blendPose(
-        { x: 42, y: 52 },
-        { x: 41, y: heavy ? 50 : 57 },
-        { x: 41, y: heavy ? 50 : 57 },
-        { x: 41, y: heavy ? 50 : 57 }
-      );
-      elbow = blendPose(
-        { x: 48, y: 68 },
-        heavy ? { x: 47, y: 34 } : { x: 50, y: 52 },
-        heavy ? { x: 57, y: 44 } : { x: 58, y: 56 },
-        heavy ? { x: 51, y: 60 } : { x: 52, y: 62 }
-      );
-      fist = blendPose(
-        { x: 43, y: 82 },
-        heavy ? { x: 37, y: 27 } : { x: 45, y: 44 },
-        heavy ? { x: 76, y: 47 } : { x: 66, y: 56 },
-        heavy ? { x: 60, y: 66 } : { x: 58, y: 64 }
-      );
+      shoulder = { x: 42, y: 52 };
+      elbow = { x: 54, y: 58 };
+      fist = { x: 65, y: 57 };
     }
+
     drawArmRig(shoulder, elbow, fist);
     // ZEALOT_SWORD_PATCH: bright afterimage arc while the blade is mid-swing
     if (isZealot(f) && active) {
@@ -23503,8 +23202,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 },
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 }
     );
-    drawArmRig(guardShoulder, guardElbow, guardFist);
-    if (f.technique === "shrine") {
+    if (punchMotion) drawArmRig({x:11,y:52},{x:17,y:65},punchMotion.guard);
+    else drawArmRig(guardShoulder, guardElbow, guardFist);
+    if (f.technique === "shrine" && !shibuyaSleeve) {
       const extraLift = blendValue(0, heavy ? -2 : -1, 1, 0);
       const extraReach = blendValue(0, -2, 4, 1);
       drawArmRig(
@@ -23519,7 +23219,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
         { x: 7 - extraReach, y: 87 - extraLift * 0.2 },
         skinColor
       );
-    }
     }
     }
   } else if (isSanji(f) && (f.sanjiCookTicks || 0) > 0) {
@@ -23565,49 +23264,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       { x: 2, y: 62 },
       { x: -8, y: 72 - jumpCycle }
     );
-  } else if (jumpPose) {
-    if (f.technique === "shrine") {
-      const airSwing = jumpCycle * 2;
-      drawArmRig(
-        { x: 44, y: 48 },
-        { x: 55 + airSwing * 0.2, y: 55 },
-        { x: 61 + airSwing, y: 64 },
-        skinColor
-      );
-      drawArmRig(
-        { x: 9, y: 49 },
-        { x: -2 - airSwing * 0.2, y: 56 },
-        { x: -8 - airSwing, y: 65 },
-        skinColor
-      );
-      if (!shibuyaSleeve) {
-      drawArmRig(
-        { x: 43, y: 63 },
-        { x: 50 - airSwing * 0.25, y: 75 },
-        { x: 44 - airSwing, y: 87 },
-        skinColor
-      );
-      drawArmRig(
-        { x: 10, y: 64 },
-        { x: 3 + airSwing * 0.25, y: 76 },
-        { x: 9 + airSwing, y: 88 },
-        skinColor
-      );
-      }
-    } else if (jumpRetreating) {
-      const armWave = jumpCycle * 2;
-      drawArmRig({ x: 41, y: 48 }, { x: 56, y: 50 + armWave }, { x: 69, y: 46 + armWave });
-      drawArmRig({ x: 12, y: 49 }, { x: -2, y: 56 - armWave }, { x: -16, y: 58 - armWave });
-    } else {
-      if (f.vy > 0.4) {
-        drawArmRig({ x: 41, y: 49 }, { x: 58, y: 39 }, { x: 78, y: 53 + jumpCycle * 2 });
-        drawArmRig({ x: 12, y: 49 }, { x: -5, y: 39 }, { x: -26, y: 53 - jumpCycle * 2 });
-      } else {
-        const armWave = jumpCycle * 3;
-        drawArmRig({ x: 41, y: 47 }, { x: 59, y: 45 }, { x: 68, y: 33 + armWave });
-        drawArmRig({ x: 12, y: 48 }, { x: -6, y: 50 }, { x: -15, y: 64 - armWave });
-      }
-    }
+  } else if (jumpPose || motion.blend >= 0.02) {
+    drawMovingArms(f, drawArmRig, skin, motion);
   } else if (f.thraggGrabState && f.thraggGrabState !== "idle") {
     if (f.thraggGrabState === "slam") {
       // GRAB_SLAM_ANIM_PATCH: arms track the throw - hoisted straight up
@@ -23973,10 +23631,10 @@ function drawTechniquePreview(canvasEl, technique, skinId) {
   ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
   ctx.fillRect(0, canvasEl.height - 20, canvasEl.width, 3);
 
-  const scale = 1.05;
+  const scale = technique === "deathnote" ? 0.77 : 1.05;
   ctx.save();
   ctx.translate(
-    canvasEl.width / 2 - (previewFighter.x + previewFighter.w / 2) * scale,
+    canvasEl.width / 2 + (technique === "deathnote" ? 26 : 0) - (previewFighter.x + previewFighter.w / 2) * scale,
     canvasEl.height - 13 - (GROUND + 4) * scale
   );
   ctx.scale(scale, scale);
@@ -26106,29 +25764,24 @@ function drawTechniqueAimPreview(f) {
   const showOnlyChargeOrb = f !== getActiveMouseTechniqueFighter();
   const aimVector = getTechniqueAimVector(f, move, f.techniqueAim);
   const radiusScale = f.technique === "limitless" ? 1 + chargeRatio * (move === "red" ? 0.95 : 0.85) : 1;
-  const radius = spec.radius * radiusScale;
+  const radius = move === "ryukStrike" ? 18 + Math.round(getLightInfoRatio(f) * 6) : spec.radius * radiusScale;
 
-  if (move === "blue" || move === "red") {
-    const chargeDistance = 38 + chargeRatio * 12;
-    ctx.save();
-    ctx.translate(
-      aimVector.origin.x + aimVector.x * chargeDistance,
-      aimVector.origin.y + aimVector.y * chargeDistance
-    );
-    drawLimitlessOrb(move, radius, aimVector.dir);
-    ctx.restore();
-  }
+  // Charging energy is attached to the arm rig; only the endpoint is previewed here.
 
   if (showOnlyChargeOrb) return;
 
   const previewDistance = getAimPreviewDistance(move, spec, chargeRatio, aimVector, f, radius);
   let ghostX = aimVector.origin.x + aimVector.x * previewDistance;
   let ghostY = aimVector.origin.y + aimVector.y * previewDistance;
+  if (move === "nameInvestigation") {
+    const point = getLightInvestigationPlacement(f, f.techniqueAim);
+    ghostX = point.x; ghostY = point.y;
+  }
   if (move === "ryukStrike") {
     const targetPoint = sanitizeAimPoint(f.techniqueAim) || sanitizeAimPoint(mouseAimWorld);
     if (targetPoint) {
       ghostX = Math.max(40, Math.min(STAGE_W - 40, targetPoint.x));
-      ghostY = Math.max(70, Math.min(GROUND - 60, targetPoint.y));
+      ghostY = Math.max(30, Math.min(GROUND - 18, targetPoint.y));
     }
   }
 
@@ -26147,7 +25800,7 @@ function drawTechniqueAimPreview(f) {
     ctx.fillStyle = "rgba(245, 245, 244, 0.78)";
     ctx.font = "900 12px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("RYUK", ghostX, ghostY + 4);
+    ctx.fillText("SHINIGAMI STRIKE", ghostX, ghostY - radius - 10);
     ctx.restore();
     return;
   }
@@ -26239,7 +25892,12 @@ function drawTechniqueAimPreview(f) {
   ctx.setLineDash([]);
 
   ctx.translate(ghostX, ghostY);
-  if (move === "blue" || move === "red") {
+  if (move === "nameInvestigation") {
+    ctx.strokeStyle = "#fca5a5"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 0, 21, 7, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 9); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.stroke();
+    drawDeathNoteCharacterModel(f.lightSummonStage <= 1 && f.lightSummonType !== "misa" ? "misa" : "soichiro", 0, 0, 0.97, { alpha: 0.42, dir: aimVector.dir });
+  } else if (move === "blue" || move === "red") {
     drawLimitlessOrb(move, radius, aimVector.dir);
   } else {
     ctx.rotate(aimVector.angle);
@@ -26252,431 +25910,13 @@ function drawProjectiles() {
   for (const p of projectiles) {
     ctx.save();
     ctx.translate(p.x, p.y);
+    drawProjectileTrail(p);
     const projectileAngle = Number(p.angle);
     const hasProjectileAngle = Number.isFinite(projectileAngle);
-    if (p.move === "purple") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const pulse = 1 + Math.sin(frame * 0.22) * 0.05;
-      ctx.globalCompositeOperation = "lighter";
-      const glow = ctx.createRadialGradient(0, 0, p.radius * 0.12, 0, 0, p.radius * 2.35 * pulse);
-      glow.addColorStop(0, "rgba(255, 255, 255, 0.98)");
-      glow.addColorStop(0.18, "rgba(216, 180, 254, 0.95)");
-      glow.addColorStop(0.46, "rgba(124, 58, 237, 0.84)");
-      glow.addColorStop(0.82, "rgba(37, 99, 235, 0.38)");
-      glow.addColorStop(1, "rgba(2, 6, 23, 0)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 2.18 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.52, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(109, 40, 217, 0.96)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.84, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(224, 242, 254, 0.9)";
-      ctx.beginPath();
-      ctx.arc(p.radius * 0.18, -p.radius * 0.18, p.radius * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(248, 113, 113, 0.88)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.06, frame * 0.19, frame * 0.19 + Math.PI * 1.35);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(56, 189, 248, 0.88)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.34, -frame * 0.14, -frame * 0.14 + Math.PI * 1.25);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(216, 180, 254, 0.62)";
-      ctx.lineWidth = 9;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 3.4, 0);
-      ctx.lineTo(-p.radius * 1.1, 0);
-      ctx.stroke();
-      ctx.globalCompositeOperation = "source-over";
-    } else if (p.move === "worldSlash") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-
-      // PURPLE_WCS_BUFF_PATCH
-      // World Cutting Slash: a wide white space wound with a black void core
-      // and red cursed-energy fractures.
-      const pulse = 1 + Math.sin(frame * 0.32) * 0.055;
-      const slashLength = p.radius * 4.8;
-      const slashHeight = p.radius * 0.82 * pulse;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.9;
-
-      // red cursed glow behind the cut
-      ctx.strokeStyle = "rgba(239, 68, 68, 0.36)";
-      ctx.lineWidth = p.radius * 0.82;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.72, slashHeight * 0.28);
-      ctx.bezierCurveTo(-slashLength * 0.25, -slashHeight * 0.8, slashLength * 0.25, slashHeight * 0.72, slashLength * 0.82, -slashHeight * 0.2);
-      ctx.stroke();
-
-      // bright white outer tear
-      ctx.strokeStyle = "rgba(255,255,255,0.98)";
-      ctx.lineWidth = p.radius * 0.38;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.85, slashHeight * 0.18);
-      ctx.bezierCurveTo(-slashLength * 0.28, -slashHeight * 0.52, slashLength * 0.25, slashHeight * 0.5, slashLength * 0.92, -slashHeight * 0.12);
-      ctx.stroke();
-
-      // black void core
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "rgba(0,0,0,0.96)";
-      ctx.lineWidth = p.radius * 0.24;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.8, slashHeight * 0.17);
-      ctx.bezierCurveTo(-slashLength * 0.25, -slashHeight * 0.42, slashLength * 0.22, slashHeight * 0.38, slashLength * 0.84, -slashHeight * 0.1);
-      ctx.stroke();
-
-      // razor center line
-      ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = "rgba(255,255,255,0.92)";
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 0.95, slashHeight * 0.06);
-      ctx.lineTo(slashLength * 0.95, -slashHeight * 0.04);
-      ctx.stroke();
-
-      // parallel fracture lines
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 4; i += 1) {
-        const off = (i - 1.5) * p.radius * 0.22;
-        ctx.beginPath();
-        ctx.moveTo(-slashLength * (0.55 + i * 0.05), off + slashHeight * 0.34);
-        ctx.lineTo(slashLength * (0.45 + i * 0.08), off - slashHeight * 0.28);
-        ctx.stroke();
-      }
-
-      // dark trailing tears
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(-slashLength * 1.05, slashHeight * 0.34);
-      ctx.lineTo(-slashLength * 0.5, slashHeight * 0.22);
-      ctx.moveTo(-slashLength * 0.9, -slashHeight * 0.24);
-      ctx.lineTo(-slashLength * 0.38, -slashHeight * 0.16);
-      ctx.stroke();
-
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
+    if (drawSorcererProjectile(p)) {
+      // Sorcerer projectile art stays aligned with its existing collision shape.
     } else if (p.move === "ryukStrike") {
-      const age = p.visualSpawnAge || 0;
-      const maxLife = p.maxLife || 34;
-      const startupTotal = Math.max(1, p.startupMax || ((p.startup || 0) + age));
-      const impactAge = Math.max(0, age - startupTotal);
-      const vanishRatio = Math.max(0, Math.min(1, (maxLife - age) / Math.max(1, maxLife * 0.35)));
-      const summonRatio = Math.max(0, Math.min(1, age / Math.max(1, startupTotal)));
-      const impactRatio = Math.max(0, Math.min(1, impactAge / 9));
-      const pulse = 1 + Math.sin(frame * 0.32) * 0.035;
-      if ((p.startup || 0) > 0) {
-        // SHINIGAMI_STRIKE_TELEPORT_PATCH: Ryuk warps in instead of the
-        // old slow dashed pop-in. Draws a bright teleport flash + swirling
-        // wings, no fade-in of the character silhouette.
-        const teleT = summonRatio; // 0..1 over the (now short) startup
-        ctx.globalCompositeOperation = "lighter";
-        // outer warp flash - shrinks in as Ryuk arrives
-        const flashR = p.radius * (2.2 - teleT * 1.4);
-        const flashGrad = ctx.createRadialGradient(0, -p.radius * 0.3, 4, 0, -p.radius * 0.3, flashR);
-        flashGrad.addColorStop(0, `rgba(220, 200, 255, ${0.85 * (1 - teleT * 0.4)})`);
-        flashGrad.addColorStop(0.4, `rgba(120, 60, 200, ${0.55 * (1 - teleT * 0.4)})`);
-        flashGrad.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = flashGrad;
-        ctx.beginPath();
-        ctx.arc(0, -p.radius * 0.3, flashR, 0, Math.PI * 2);
-        ctx.fill();
-        // sharp vertical lightning bolt streaks (Ryuk's warp signature)
-        ctx.strokeStyle = `rgba(200, 170, 255, ${0.9 * (1 - teleT * 0.5)})`;
-        ctx.lineWidth = 3;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        for (let i = 0; i < 5; i++) {
-          const ang = (i / 5) * Math.PI * 2 + frame * 0.08;
-          const r0 = p.radius * 0.15;
-          const r1 = p.radius * (1.4 - teleT);
-          ctx.moveTo(Math.cos(ang) * r0, Math.sin(ang) * r0 - p.radius * 0.2);
-          ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1 - p.radius * 0.2);
-        }
-        ctx.stroke();
-
-        // once the warp has almost finished, Ryuk fades in fully solid
-        // (no drawn-out ghost fade - this happens over 2-3 frames now).
-        ctx.globalCompositeOperation = "source-over";
-        drawDeathNoteCharacterModel("ryuk", 0, -p.radius * 0.35, Math.max(0.9, p.radius / 72), {
-          alpha: Math.min(1, teleT * 3.5)
-        });
-        ctx.restore();
-        continue;
-      }
-
-      ctx.globalAlpha = vanishRatio;
-      ctx.globalCompositeOperation = "source-over";
-      const smokeHalo = ctx.createRadialGradient(0, 0, p.radius * 0.1, 0, 0, p.radius * 1.45);
-      smokeHalo.addColorStop(0, lightBrownRgba("cream", 0.18));
-      smokeHalo.addColorStop(0.3, lightBrownRgba("dark", 0.34));
-      smokeHalo.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = smokeHalo;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(0,0,0,0.24)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.9)";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * pulse, 0, Math.PI * 2);
-      ctx.stroke();
-
-      const ryukY = -p.radius * (1.72 - impactRatio * 0.22);
-      drawDeathNoteCharacterModel("ryuk", 0, ryukY + p.radius * 1.04, Math.max(0.96, p.radius / 68), {
-        alpha: 1,
-        pose: "punch",
-        punch: impactRatio
-      });
-
-      // Rounded black arrow: blunt head, thick shaft, and no slash/cleave styling.
-      const arrowDrop = 1 - Math.pow(1 - impactRatio, 3);
-      const startY = ryukY + p.radius * 0.46 + arrowDrop * p.radius * 0.58;
-      const endY = -p.radius * 0.12 + arrowDrop * p.radius * 0.36;
-      ctx.strokeStyle = lightBrownRgba("deep", 0.96);
-      ctx.lineWidth = Math.max(12, p.radius * 0.18);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(0, startY);
-      ctx.lineTo(0, endY);
-      ctx.stroke();
-      ctx.fillStyle = lightBrownRgba("dark", 0.98);
-      ctx.beginPath();
-      ctx.roundRect(-p.radius * 0.22, endY - p.radius * 0.08, p.radius * 0.44, p.radius * 0.28, p.radius * 0.12);
-      ctx.fill();
-
-      ctx.fillStyle = `rgba(0,0,0,${0.38 * vanishRatio})`;
-      for (let i = 0; i < 10; i += 1) {
-        const a = frame * 0.05 + i * 0.72;
-        ctx.beginPath();
-        ctx.arc(Math.cos(a) * p.radius * 0.78, Math.sin(a) * p.radius * 0.42, 4 + (i % 3) * 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (p.move === "red") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
-      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_RED_GROW_PATCH
-      ctx.scale(visualScale, visualScale);
-      const pulse = 1 + Math.sin(frame * 0.34) * 0.08;
-      const redGlow = ctx.createRadialGradient(0, 0, p.radius * 0.15, 0, 0, p.radius * 1.75 * pulse);
-      redGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      redGlow.addColorStop(0.18, "rgba(254, 202, 202, 0.95)");
-      redGlow.addColorStop(0.48, "rgba(239, 68, 68, 0.82)");
-      redGlow.addColorStop(1, "rgba(127, 29, 29, 0)");
-      ctx.fillStyle = redGlow;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, p.radius * 1.75 * pulse, p.radius * 1.35 * pulse, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(248, 113, 113, 0.92)";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, p.radius * 0.88, p.radius * 0.72, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
-      ctx.beginPath();
-      ctx.ellipse(p.radius * 0.18, -p.radius * 0.12, p.radius * 0.34, p.radius * 0.24, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(127, 29, 29, 0.72)";
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.55, -p.radius * 0.42);
-      ctx.lineTo(-p.radius * 0.35, -p.radius * 0.16);
-      ctx.moveTo(-p.radius * 1.35, p.radius * 0.48);
-      ctx.lineTo(-p.radius * 0.24, p.radius * 0.22);
-      ctx.stroke();
-
-      ctx.strokeStyle = "rgba(254, 226, 226, 0.95)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.02, frame * 0.18, frame * 0.18 + Math.PI * 1.15);
-      ctx.stroke();
-    } else if (p.move === "blue") {
-      const visualGrow = Math.min(1, ((p.visualSpawnAge || 1) / 10));
-      const visualScale = 0.12 + (1 - Math.pow(1 - visualGrow, 3)) * 0.88; // VISUAL_BLUE_GROW_PATCH
-      ctx.scale(visualScale, visualScale);
-      const spin = frame * 0.16;
-      const pulse = 1 + Math.sin(frame * 0.22) * 0.06;
-      const blueGlow = ctx.createRadialGradient(0, 0, 1, 0, 0, p.radius * 1.8 * pulse);
-      blueGlow.addColorStop(0, "rgba(2, 6, 23, 0.95)");
-      blueGlow.addColorStop(0.28, "rgba(29, 78, 216, 0.92)");
-      blueGlow.addColorStop(0.6, "rgba(56, 189, 248, 0.72)");
-      blueGlow.addColorStop(1, "rgba(56, 189, 248, 0)");
-      ctx.fillStyle = blueGlow;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 1.8 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius * 0.52, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(224, 242, 254, 0.9)";
-      ctx.beginPath();
-      ctx.arc(-p.radius * 0.15, -p.radius * 0.12, p.radius * 0.2, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(186, 230, 253, 0.9)";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      for (let i = 0; i < 3; i += 1) {
-        ctx.beginPath();
-        ctx.arc(0, 0, p.radius * (0.82 + i * 0.28), spin + i * 1.8, spin + i * 1.8 + Math.PI * 1.25);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(14, 165, 233, 0.65)";
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 6; i += 1) {
-        const a = spin + i * Math.PI / 3;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * p.radius * 1.05, Math.sin(a) * p.radius * 1.05);
-        ctx.lineTo(Math.cos(a + 0.42) * p.radius * 1.55, Math.sin(a + 0.42) * p.radius * 1.55);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = "rgba(224, 242, 254, 0.78)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, p.radius + 6, spin, spin + Math.PI * 1.5);
-      ctx.stroke();
-    } else if (p.move === "fuga") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      const pulse = 1 + Math.sin(frame * 0.36) * 0.08;
-      const flameGlow = ctx.createRadialGradient(-p.radius * 0.5, 0, 1, -p.radius * 0.2, 0, p.radius * 2.9 * pulse);
-      flameGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-      flameGlow.addColorStop(0.2, "rgba(254, 240, 138, 0.92)");
-      flameGlow.addColorStop(0.48, "rgba(249, 115, 22, 0.82)");
-      flameGlow.addColorStop(1, "rgba(127, 29, 29, 0)");
-      ctx.fillStyle = flameGlow;
-      ctx.beginPath();
-      ctx.ellipse(-p.radius * 0.25, 0, p.radius * 2.75 * pulse, p.radius * 0.95 * pulse, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(2, 6, 23, 0.92)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.85, -p.radius * 0.18);
-      ctx.lineTo(p.radius * 1.06, -p.radius * 0.18);
-      ctx.lineTo(p.radius * 1.86, 0);
-      ctx.lineTo(p.radius * 1.06, p.radius * 0.18);
-      ctx.lineTo(-p.radius * 1.85, p.radius * 0.18);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(185, 28, 28, 0.96)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.25, -p.radius * 0.09);
-      ctx.lineTo(p.radius * 1.02, -p.radius * 0.09);
-      ctx.lineTo(p.radius * 1.55, 0);
-      ctx.lineTo(p.radius * 1.02, p.radius * 0.09);
-      ctx.lineTo(-p.radius * 1.25, p.radius * 0.09);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
-      ctx.beginPath();
-      ctx.moveTo(p.radius * 0.72, -p.radius * 0.58);
-      ctx.lineTo(p.radius * 2.12, 0);
-      ctx.lineTo(p.radius * 0.72, p.radius * 0.58);
-      ctx.lineTo(p.radius * 1.02, 0);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(254, 240, 138, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(p.radius * 0.88, -p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.72, 0);
-      ctx.lineTo(p.radius * 0.88, p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.08, 0);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(254, 240, 138, 0.92)";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.62, 0);
-      ctx.lineTo(p.radius * 1.2, 0);
-      ctx.stroke();
-
-      ctx.strokeStyle = "rgba(2, 6, 23, 0.82)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.65, -p.radius * 0.52);
-      ctx.lineTo(-p.radius * 0.92, 0);
-      ctx.lineTo(-p.radius * 1.65, p.radius * 0.52);
-      ctx.moveTo(-p.radius * 1.28, -p.radius * 0.44);
-      ctx.lineTo(-p.radius * 0.62, 0);
-      ctx.lineTo(-p.radius * 1.28, p.radius * 0.44);
-      ctx.stroke();
-
-      ctx.fillStyle = "rgba(254, 240, 138, 0.9)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 2.0, -p.radius * 0.48);
-      ctx.quadraticCurveTo(-p.radius * 2.75, 0, -p.radius * 2.0, p.radius * 0.5);
-      ctx.quadraticCurveTo(-p.radius * 1.48, 0, -p.radius * 2.0, -p.radius * 0.48);
-      ctx.fill();
-
-      ctx.strokeStyle = "rgba(127, 29, 29, 0.92)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.2, -p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.25, -p.radius * 0.08);
-      ctx.moveTo(-p.radius * 1.2, p.radius * 0.28);
-      ctx.lineTo(p.radius * 1.25, p.radius * 0.08);
-      ctx.stroke();
-    } else if (p.move === "slash") {
-      if (hasProjectileAngle) ctx.rotate(projectileAngle);
-      else ctx.scale(p.dir, 1);
-      ctx.rotate(-0.1);
-      ctx.fillStyle = "rgba(2, 6, 23, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.4, -p.radius * 0.32);
-      ctx.lineTo(p.radius * 1.65, -p.radius * 0.95);
-      ctx.lineTo(p.radius * 1.35, -p.radius * 0.25);
-      ctx.lineTo(p.radius * 1.8, p.radius * 0.12);
-      ctx.lineTo(-p.radius * 1.2, p.radius * 0.68);
-      ctx.lineTo(-p.radius * 0.75, p.radius * 0.08);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = "rgba(220, 38, 38, 0.95)";
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.1, -p.radius * 0.2);
-      ctx.lineTo(p.radius * 1.25, -p.radius * 0.62);
-      ctx.lineTo(p.radius * 0.95, -p.radius * 0.15);
-      ctx.lineTo(p.radius * 1.38, p.radius * 0.1);
-      ctx.lineTo(-p.radius * 0.95, p.radius * 0.48);
-      ctx.lineTo(-p.radius * 0.55, p.radius * 0.05);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "rgba(15, 23, 42, 0.95)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-p.radius * 1.2, p.radius * 0.45);
-      ctx.lineTo(p.radius * 1.45, -p.radius * 0.72);
-      ctx.stroke();
+      drawRyukStrike(p);
     } else if (p.move === "groundBreak") {
       // THRAGG_THEME_PATCH: Ground Break had no draw case and fell into
       // the generic fallback, which renders the red Sukuna-style slash -
@@ -27256,7 +26496,7 @@ function draw() {
   ctx.scale(cameraZoom, cameraZoom);
   ctx.translate(-cameraX, 0);
   getStage().draw(); // STAGE_SELECT_PATCH
-  if (!activeDomain && !pendingDomain && !domainClash) drawStageAtmosphere(); // STAGE_ATMOSPHERE_PATCH
+  if (!activeDomain && !pendingDomain && !domainClash) { drawArenaFinish(); drawStageAtmosphere(); } // STAGE_ATMOSPHERE_PATCH
   drawUpsideDownBackdrop(); // VECNA_PATCH
   drawActiveDomainBackdrop();
 
@@ -27595,58 +26835,8 @@ function drawUltimateScreenEffects() {
     glow.addColorStop(1, "rgba(2, 6, 23, 0)");
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, W, H);
-  } else if (ultimateScreenEffect.kind === "deathNote") {
-    const flicker = 0.65 + Math.sin(frame * 0.75) * 0.18 + Math.sin(frame * 0.21) * 0.12;
-    ctx.fillStyle = `rgba(2, 6, 23, ${0.74 * t})`;
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = `rgba(127, 29, 29, ${0.18 * t * flicker})`;
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.save();
-    ctx.translate(W * 0.5, H * 0.5);
-    ctx.rotate(-0.08 + Math.sin(frame * 0.03) * 0.015);
-    ctx.fillStyle = `rgba(250, 250, 245, ${0.92 * t})`;
-    ctx.strokeStyle = `rgba(15, 23, 42, ${0.9 * t})`;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.roundRect(-132, -72, 264, 144, 6);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = `rgba(15, 23, 42, ${0.86 * t})`;
-    ctx.font = "900 26px Georgia, serif";
-    ctx.textAlign = "center";
-    ctx.fillText("DEATH NOTE", 0, -24);
-    ctx.strokeStyle = `rgba(127, 29, 29, ${0.72 * t})`;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 5; i += 1) {
-      const y = 4 + i * 15;
-      ctx.beginPath();
-      ctx.moveTo(-96, y);
-      ctx.lineTo(96 - age * 34 + i * 4, y + Math.sin(frame * 0.08 + i) * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.fillStyle = `rgba(0,0,0,${0.62 * t})`;
-    ctx.beginPath();
-    ctx.ellipse(W * 0.73, H * 0.48, 58 + age * 18, 112, 0.08, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = `rgba(239,68,68,${0.78 * t})`;
-    ctx.beginPath();
-    ctx.arc(W * 0.71, H * 0.42, 5 + Math.sin(frame * 0.4) * 1.5, 0, Math.PI * 2);
-    ctx.arc(W * 0.75, H * 0.42, 5 + Math.cos(frame * 0.37) * 1.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = `rgba(248, 113, 113, ${0.68 * t})`;
-    ctx.lineWidth = 3;
-    for (let i = 0; i < 8; i += 1) {
-      const x = W * (0.12 + i * 0.11);
-      const y = H * (0.2 + ((i * 37) % 55) / 100);
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.sin(frame * 0.09 + i) * 26, y + 38 + age * 46);
-      ctx.stroke();
-    }
+  } else if (ultimateScreenEffect.kind === "deathNoteWriting") {
+    drawDeathNoteWritingScene(ultimateScreenEffect);
   } else {
     ctx.fillStyle = `rgba(2, 6, 23, ${0.28 * t})`;
     ctx.fillRect(0, 0, W, H);
@@ -27672,6 +26862,8 @@ function drawUltimateScreenEffects() {
 }
 
 function fixedUpdate() {
+  // Clear before input and hit-stop as well as after ability updates.
+  applyPracticeSettingsTick();
   frame += 1;
   walkingSfxActiveThisFrame = false;
   if (actionWarning && actionWarning.ticks > 0) actionWarning.ticks -= 1;
@@ -27759,6 +26951,7 @@ function fixedUpdate() {
       finishRound(koWinner);
     }
   }
+  if (!paused) { tickFighterMotion(player); tickFighterMotion(enemy); }
   updateStage(); // STAGE_SELECT_PATCH
   applyPracticeSettingsTick();
   finalizeWalkingSfx();
