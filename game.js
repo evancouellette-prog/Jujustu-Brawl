@@ -2460,6 +2460,7 @@ let onlineConnected = false;
 let onlineWaiting = false;
 let onlinePlayers = { p1: 0, p2: 0 };
 let onlineTechniqueChoices = { p1: null, p2: null };
+let onlineSkinChoices = { p1: "default", p2: "default" };
 let onlinePickedTechnique = false;
 let lastOnlineStateSent = 0;
 let lastOnlineInputSent = 0;
@@ -2473,13 +2474,13 @@ const ONLINE_STATE_SEND_MS = 50;       // host snapshots, about 20/sec
 const ONLINE_FIGHTER_SEND_MS = 50;     // joiner fighter snapshots, about 20/sec
 const ONLINE_INPUT_ACTIVE_MS = 33;     // movement input, about 30/sec
 const ONLINE_INPUT_IDLE_MS = 120;      // idle heartbeat, about 8/sec
-const ONLINE_SOCKET_BACKPRESSURE_LIMIT = 120000;
+const ONLINE_SOCKET_BACKPRESSURE_LIMIT = 16384;
 
-function canSendOnlinePacket() {
+function canSendOnlinePacket(reliable = false) {
   return Boolean(
     onlineSocket &&
     onlineSocket.readyState === WebSocket.OPEN &&
-    (onlineSocket.bufferedAmount || 0) < ONLINE_SOCKET_BACKPRESSURE_LIMIT
+    (reliable || (onlineSocket.bufferedAmount || 0) < ONLINE_SOCKET_BACKPRESSURE_LIMIT)
   );
 }
 
@@ -2508,7 +2509,7 @@ function compactProjectileForNetwork(p) {
     visualOnly: true
   };
   if (p.move === "ryukStrike") {
-    for (const key of ["startX", "startY", "bodyX", "bodyY", "ryukX", "ryukY", "fistX", "fistY", "travelTicks", "windupTicks", "activeTicks", "recoveryTicks", "returnTicks", "startup", "startupMax", "age", "maxLife"]) compact[key] = p[key];
+    for (const key of ["punchArm", "startX", "startY", "bodyX", "bodyY", "ryukX", "ryukY", "fistX", "fistY", "travelTicks", "windupTicks", "activeTicks", "recoveryTicks", "returnTicks", "startup", "startupMax", "age", "maxLife"]) compact[key] = p[key];
   }
   return compact;
 }
@@ -2877,8 +2878,9 @@ function startRyukStrike(f, aimPoint = null, cost = 0) {
   const returnTicks = travelTicks;
   const maxLife = travelTicks + windupTicks + activeTicks + recoveryTicks + returnTicks;
   if (cost > 0) f.ce = Math.max(0, f.ce - cost);
+  const punchArm = advancePunchArm(f);
   projectiles.push({
-    owner: getFighterOwner(f), move: "ryukStrike", x, y, dir,
+    owner: getFighterOwner(f), move: "ryukStrike", x, y, dir, punchArm,
     vx: 0, vy: 0, baseVx: 0, baseVy: 0, aimX: dir, aimY: 0,
     angle: dir > 0 ? 0 : Math.PI, radius: 18 + Math.round(getLightInfoRatio(f) * 6),
     damage: Math.ceil(34 * getOutgoingDamageMultiplier(f)), knockback: 34,
@@ -3321,6 +3323,11 @@ function getAttackSpec(f, type = f.attacking) {
       attack.knockback += 3;
       attack.windup = 13;
       attack.recovery = 23;
+    }
+    if (isHeianSukuna(f)) {
+      // Four arms let Heian recover between strikes faster than the two-arm cast.
+      if (type === "light") Object.assign(attack, {windup:1, active:4, recovery:4});
+      if (type === "heavy") Object.assign(attack, {windup:4, active:5, recovery:6});
     }
   }
   if (f.technique === "deathnote" && type !== "backThrow") {
@@ -3842,6 +3849,8 @@ function makeFighter(config) {
     onPlatform: false,
     attacking: null,
     attackFrame: 0,
+    punchArm: 0,
+    nextPunchArm: 0,
     hasHit: false,
     queuedAttack: null,
     comboCount: 0,
@@ -5617,7 +5626,7 @@ function updateControlsPanel() {
 }
 
 function broadcastFullBattleRestart() {
-  if (!canSendOnlinePacket() || gameMode !== "online") return;
+  if (!canSendOnlinePacket(true) || gameMode !== "online") return;
   onlineSocket.send(JSON.stringify({ type: "restart-full", role: onlineRole || "local", stamp: Date.now() }));
 }
 
@@ -5668,6 +5677,7 @@ function restartWholeBattle(broadcast = true) {
 
   // Local CPU/PVP/practice restart: go back to character select and fully reset the match.
   onlineTechniqueChoices = { p1: null, p2: null };
+  onlineSkinChoices = { p1: "default", p2: "default" };
   onlinePickedTechnique = false;
   setGameState("lobby", "full local restart");
   homeOpen = false;
@@ -5700,6 +5710,7 @@ function openHomeScreen() {
   onlineConnected = false;
   onlinePlayers = { p1: 0, p2: 0 };
   onlineTechniqueChoices = { p1: null, p2: null };
+  onlineSkinChoices = { p1: "default", p2: "default" };
   onlinePickedTechnique = false;
   cpuOpponentTechniqueLocked = false;
   resetReadyPhase("home");
@@ -5741,6 +5752,7 @@ function finishTechniqueSelect(technique) {
   selectedTechnique = technique;
   if (onlineRole === "p1" || onlineRole === "p2") {
     onlineTechniqueChoices[onlineRole] = technique;
+    onlineSkinChoices[onlineRole] = getSelectedSkin(technique);
     onlinePickedTechnique = true;
   }
   homeOpen = false;
@@ -5809,6 +5821,8 @@ function updateOnlineWaiting() {
 
   // Do not let either player pick a character until both players are actually in the room.
   if (!bothPresent) {
+    keys.clear();
+    remoteInput = {left:false,right:false,up:false,down:false,block:false,rct:false,heavy:false,bluePunch:false};
     techniqueScreen.classList.add("hidden");
     updateReadyPromptVisibility();
     if (onlineRole === "p1" && !hasJoiner) {
@@ -5853,15 +5867,15 @@ function applyOnlineTechniqueChoice(role, technique, reason = "") {
 }
 
 function sendOnlineTechniqueChoice() {
-  if (!canSendOnlinePacket() || gameMode !== "online") return;
+  if (!canSendOnlinePacket(true) || gameMode !== "online") return;
   if (onlineRole !== "p1" && onlineRole !== "p2") return;
   const technique = onlineTechniqueChoices[onlineRole] || selectedTechnique;
   if (!isValidTechnique(technique)) return;
-  onlineSocket.send(JSON.stringify({ type: "technique", role: onlineRole, technique }));
+  onlineSocket.send(JSON.stringify({ type: "technique", role: onlineRole, technique, skinId:getSelectedSkin(technique) }));
 }
 
 function sendOnlinePause(value) {
-  if (!canSendOnlinePacket() || gameMode !== "online") return;
+  if (!canSendOnlinePacket(true) || gameMode !== "online") return;
   onlineSocket.send(JSON.stringify({ type: "pause", paused: value }));
 }
 
@@ -5877,16 +5891,9 @@ function setPaused(value, broadcast = true) {
 function startOnlineGame(role) {
   onlineRole = role;
   onlineConnected = true;
-  
-  
-  
-  sendOnlineName(); // NAME_SEND_ON_CONNECT
+  sendOnlineName();
   updatePlayerNameLabels();
-sendOnlineName(); // CLEAN_ONLINE_NAME_SEND
-  updatePlayerNameLabels();
-sendOnlineName(); // ONLINE_NAME_SEND_PATCH
-  updatePlayerNameLabels();
-homeOpen = false;
+  homeOpen = false;
   paused = false;
   gameMode = "online";
   setGameState("lobby", "online role assigned");
@@ -5956,6 +5963,7 @@ function syncHostPlayerToJoiner(remotePlayer) {
   // The old "protect local hit state" code kept P2's predicted/stale copy of
   // Player 1 during hurt/stun frames, which made the host look frozen on P2's
   // screen even while the host was moving normally on their own screen.
+  recordOnlineMotion(player, remotePlayer);
   Object.assign(player, remotePlayer);
   syncDeathNoteWritingEffect(player);
 }
@@ -5966,8 +5974,8 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
   // P2 is the owner of `enemy`. Use their fighter packet for short combat
   // windows that are easy to miss through plain key-input messages.
   const fields = [
-    "x", "y", "vx", "vy", "dir", "grounded", "jumpsUsed", "onPlatform",
-    "attacking", "attackFrame", "hasHit", "queuedAttack", "pendingPunchCooldown", "punchCooldown",
+    "x", "y", "vx", "vy", "dir", "grounded", "jumpsUsed", "onPlatform", "skinId", "walkCycle",
+    "attacking", "attackFrame", "punchArm", "nextPunchArm", "hasHit", "queuedAttack", "pendingPunchCooldown", "punchCooldown",
     "comboCount", "comboTimer", "comboChainTimer", "comboLightsUsed", "comboHeavyUsed", "lastAttackType",
     "blocking", "rctHealing", "chargingTechnique", "chargeTicks", "techniqueAim",
     "barrageTimer", "barrageDuration", "barrageHitsDone", "barrageDamageRemaining", "barrageKnockback", "barrageDir", "barrageTarget", "barrageLockX", "barrageLockY",
@@ -5996,6 +6004,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
     "akiraWork", "akiraGoalsCompleted", "akiraDmgBuff", "akiraSpdBuff", "akiraCdBuff", "akiraHealBuff", "akiraUltBuff", "akiraOvertimeTicks", "akiraOvertimeCooldown", "akiraBeerTicks", "akiraBeerCooldown", "akiraJoyrideTicks", "akiraJoyrideCooldown", "akiraVoltTicks", "akiraVoltCooldown", "akiraSharkTicks", "akiraSharkCooldown", "akiraUltTicks", "akiraUltTier"
   ];
 
+  recordOnlineMotion(enemy, remoteFighter);
   fields.forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(remoteFighter, field)) return;
 
@@ -6025,15 +6034,36 @@ function connectOnline(room = onlineRoom, side = onlineSide) {
   onlineConnected = false;
   onlinePlayers = { p1: 0, p2: 0 };
   onlineTechniqueChoices = { p1: null, p2: null };
+  onlineSkinChoices = { p1: "default", p2: "default" };
   onlinePickedTechnique = false;
   roomCodeInput.value = onlineRoom;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socketHost = window.location.protocol === "file:" ? "localhost:8080" : window.location.host;
   const sideQuery = side ? `&side=${encodeURIComponent(side)}` : "";
-  onlineSocket = new WebSocket(`${protocol}//${socketHost}/ws?room=${encodeURIComponent(onlineRoom)}${sideQuery}`);
+  const connection = new WebSocket(`${protocol}//${socketHost}/ws?room=${encodeURIComponent(onlineRoom)}${sideQuery}`);
+  onlineSocket = connection;
+  resetOnlineMotion();
+  lastOnlineStateSent = lastOnlineInputSent = lastOnlineFighterSent = 0;
+  lastOnlineInputKey = "";
+  let connectionProblem = false;
+  const connectionTimeout = setTimeout(() => {
+    if (onlineSocket !== connection || onlineConnected) return;
+    connectionProblem = true;
+    showWaiting("Connection Timed Out", "The server is taking too long. Go Home and try again.");
+    connection.close();
+  }, 20000);
 
-  onlineSocket.addEventListener("message", (event) => {
-    const data = JSON.parse(event.data);
+  connection.addEventListener("message", (event) => {
+    if (onlineSocket !== connection) return;
+    let data;
+    try { data = JSON.parse(event.data); } catch { return; }
+    if (!data || typeof data !== "object") return;
+    if (data.type === "room-error") {
+      connectionProblem = true;
+      clearTimeout(connectionTimeout);
+      showWaiting(data.code === "not-found" ? "Host Not Found" : "Room Full", data.message);
+      return;
+    }
     
     
     if (data.type === "restart-full") {
@@ -6048,12 +6078,18 @@ if (data.type === "name") {
       return;
     }
 if (data.type === "role") {
+      clearTimeout(connectionTimeout);
       startOnlineGame(data.role);
       return;
     }
 
     if (data.type === "room") {
+      const lostPeer = bothOnlinePlayersPresent() && (!data.players?.p1 || !data.players?.p2);
       onlinePlayers = data.players;
+      if (lostPeer) {
+        onlineTechniqueChoices[onlineRole === "p1" ? "p2" : "p1"] = null;
+        resetGame();
+      }
       updateOnlineWaiting();
       return;
     }
@@ -6065,6 +6101,11 @@ if (data.type === "role") {
 
     if (data.type === "technique") {
       applyOnlineTechniqueChoice(data.role, data.technique, "remote choice");
+      const fighter = data.role === "p1" ? player : enemy;
+      if (CHARACTER_SKINS[data.technique]?.some(skin => skin.id === data.skinId)) {
+        onlineSkinChoices[data.role] = data.skinId;
+        fighter.skinId = data.skinId;
+      }
       return;
     }
 
@@ -6094,7 +6135,7 @@ if (data.type === "role") {
 
     if (onlineRole === "p1" && data.type === "input") {
       if (gameState !== "playing") return;
-      remoteInput = data.input;
+      if (data.input && typeof data.input === "object") remoteInput = data.input;
       if (data.aim) setFighterTechniqueAim(enemy, data.aim);
       if (data.action === "light") startAttack(enemy, "light");
       if (data.action === "heavy") startAttack(enemy, "heavy");
@@ -6171,6 +6212,7 @@ if (data.type === "role") {
     }
 
     if (onlineRole !== "p1" && data.type === "state") {
+      if (!data.player || !data.enemy) return;
       // P2 controls `enemy` locally. Do NOT blindly overwrite local combat timing
       // from the host snapshot every frame.
       if (onlineRole === "p2") syncHostPlayerToJoiner(data.player);
@@ -6190,9 +6232,10 @@ if (data.type === "role") {
       player.technique = data.player.technique;
       if (onlineRole === "p2") {
         const ownTechnique = onlineTechniqueChoices.p2 || selectedTechnique;
-        if (isValidTechnique(ownTechnique)) {
+        if (isValidTechnique(ownTechnique) && enemy.technique !== ownTechnique) {
           enemy.technique = ownTechnique;
           applyTechniqueStats(enemy, true);
+          updateControlsVisibility();
         }
       }
       if (data.projectiles) {
@@ -6233,11 +6276,21 @@ if (data.type === "role") {
     }
   });
 
-  onlineSocket.addEventListener("close", () => {
+  connection.addEventListener("close", () => {
+    clearTimeout(connectionTimeout);
+    if (onlineSocket !== connection) return;
     onlineConnected = false;
-    if (gameMode === "online" && !homeOpen) {
+    keys.clear();
+    if (!connectionProblem && !homeOpen) {
       showWaiting("Disconnected", "Go Home and start or join the battle again.");
     }
+  });
+  connection.addEventListener("error", () => {
+    if (onlineSocket !== connection) return;
+    connectionProblem = true;
+    clearTimeout(connectionTimeout);
+    onlineConnected = false;
+    showWaiting("Could Not Connect", "Check your connection, then go Home and try again.");
   });
 }
 
@@ -6379,7 +6432,7 @@ function clearSpecialHoldState(f = null) {
 }
 
 function sendOnlineInput(action = null, aim = null, extra = null) {
-  if (!canSendOnlinePacket() || onlineRole !== "p2") return;
+  if (!canSendOnlinePacket(true) || onlineRole !== "p2") return;
   lastOnlineInputKey = JSON.stringify(getOnlineInput());
   lastOnlineInputSent = performance.now();
   const aimPoint = sanitizeAimPoint(aim);
@@ -6440,6 +6493,8 @@ function getFighterNetworkState(f) {
     grounded: f.grounded,
     attacking: f.attacking,
     attackFrame: f.attackFrame,
+    punchArm: f.punchArm,
+    nextPunchArm: f.nextPunchArm,
     hasHit: f.hasHit,
     blocking: f.blocking,
     dodging: f.dodging,
@@ -6463,6 +6518,7 @@ function getFighterNetworkState(f) {
     knockbackTakenMultiplier: f.knockbackTakenMultiplier,
     outgoingDamageMultiplier: f.outgoingDamageMultiplier,
     technique: f.technique,
+    skinId: skinOf(f),
     techniqueCooldown: f.techniqueCooldown,
     techniqueCooldownMax: f.techniqueCooldownMax,
     comboCount: f.comboCount,
@@ -6559,7 +6615,7 @@ function getFighterNetworkState(f) {
 }
 
 function sendOnlineFighterState() {
-  if (!canSendOnlinePacket() || onlineRole !== "p2" || gameState !== "playing") return;
+  if (!canSendOnlinePacket() || onlineRole !== "p2" || gameState !== "playing" || homeOpen || paused || onlineWaiting) return;
   const now = performance.now();
   if (now - lastOnlineFighterSent < ONLINE_FIGHTER_SEND_MS) return;
   lastOnlineFighterSent = now;
@@ -6567,7 +6623,7 @@ function sendOnlineFighterState() {
 }
 
 function sendOnlineDamage(hit) {
-  if (!canSendOnlinePacket() || onlineRole !== "p2") return;
+  if (!canSendOnlinePacket(true) || onlineRole !== "p2") return;
 
   const holdLock = hit && (hit.barrageHold || hit.grabHold);
   const bigLock = hit && (hit.knockdown || hit.gojoPushPull || hit.gojoRedHeavy || hit.blueChase);
@@ -6595,14 +6651,14 @@ function sendOnlineDamage(hit) {
 }
 
 function sendOnlineReady() {
-  if (!canSendOnlinePacket() || !isOnlinePlayerRole()) return;
+  if (!canSendOnlinePacket(true) || !isOnlinePlayerRole()) return;
   lastOnlineReadySent = performance.now();
   console.log("[ready send]", { role: onlineRole, phase: gameState, round: currentRound });
   onlineSocket.send(JSON.stringify({ type: "ready", role: onlineRole, phase: gameState, round: currentRound }));
 }
 
 function sendOnlineState() {
-  if (!canSendOnlinePacket() || onlineRole !== "p1") return;
+  if (!canSendOnlinePacket() || onlineRole !== "p1" || homeOpen || !onlineConnected || !hasPickedOnlineTechnique()) return;
   const now = performance.now();
   if (now - lastOnlineStateSent < ONLINE_STATE_SEND_MS) return;
   lastOnlineStateSent = now;
@@ -6641,6 +6697,7 @@ function sendOnlineState() {
 }
 
 function resetRoundActors() {
+  resetOnlineMotion();
   platforms = makeStagePlatforms(currentStageId); // STAGE_SELECT_PATCH
   stageHazards = [];
   stageHazardTimer = 90;
@@ -6690,6 +6747,10 @@ function resetRoundActors() {
   // SKINS_PATCH: apply the player's chosen cosmetic skin for each character.
   player.skinId = getSelectedSkin(player.technique);
   enemy.skinId = getSelectedSkin(enemy.technique);
+  if (gameMode === "online") {
+    player.skinId = onlineSkinChoices.p1 || "default";
+    enemy.skinId = onlineSkinChoices.p2 || "default";
+  }
   applyTechniqueStats(player);
   applyTechniqueStats(enemy);
   applyCpuDifficultyStats();
@@ -7196,11 +7257,18 @@ function getExtraCooldownItems(f) {
   return items;
 }
 
+const extraCooldownRows = new WeakMap();
 function updateExtraCooldownHud(container, f) {
   if (!container) return;
 
   const items = getExtraCooldownItems(f);
-  container.innerHTML = "";
+  const signature = f.technique + "|" + items.map(item=>item.name).join("|");
+  let cached = extraCooldownRows.get(container);
+  if (!cached || cached.signature !== signature) {
+    container.replaceChildren();
+    cached = {signature, rows:[]};
+    extraCooldownRows.set(container,cached);
+  }
 
   if (!items.length) {
     container.classList.add("hidden");
@@ -7209,28 +7277,29 @@ function updateExtraCooldownHud(container, f) {
 
   container.classList.remove("hidden");
 
-  items.forEach((item) => {
+  items.forEach((item, index) => {
     const ratio = getCooldownRatio(item.current, item.max);
     const isResource = item.mode === "resource";
     const isActiveTimer = item.mode === "active";
     const ready = isResource ? ratio >= 1 : ratio <= 0;
     const fillPercent = isResource || isActiveTimer ? ratio * 100 : (1 - ratio) * 100;
 
-    const row = document.createElement("div");
+    const existing = cached.rows[index];
+    const row = existing?.row || document.createElement("div");
     row.className = `extra-cooldown ct-slot unified-cooldown ${ready ? "ready" : "cooling"} ${f.technique === "shrine" ? "sukuna-cooldown" : f.technique === "deathnote" ? "light-cooldown" : f.technique === "brawler" ? "thragg-cooldown" : f.technique === "blackleg" ? "sanji-cooldown" : f.technique === "hivemind" ? "vecna-cooldown" : f.technique === "zealot" ? "zealot-cooldown" : f.technique === "spider" ? "spider-cooldown" : f.technique === "beast" ? "beast-cooldown" : f.technique === "jiji" ? "jiji-cooldown" : f.technique === "david" ? "david-cooldown" : f.technique === "akira" ? "akira-cooldown" : "gojo-cooldown"} ${item.style || ""}`;
 
-    const label = document.createElement("span");
+    const label = existing?.label || document.createElement("span");
     label.className = "extra-cooldown-label ct-label";
     label.textContent = item.name;
 
-    const meter = document.createElement("div");
+    const meter = existing?.meter || document.createElement("div");
     meter.className = "ct-meter";
 
-    const fill = document.createElement("div");
+    const fill = existing?.fill || document.createElement("div");
     fill.className = "extra-cooldown-fill ct-fill";
     fill.style.width = `${fillPercent}%`;
 
-    const status = document.createElement("span");
+    const status = existing?.status || document.createElement("span");
     status.className = "extra-cooldown-status ct-status";
     const isActiveBuff = item.name === "SIMPLE DOMAIN" && (f.simpleDomainTicks || 0) > 0
       || item.name.startsWith("VOW: ")
@@ -7244,9 +7313,12 @@ function updateExtraCooldownHud(container, f) {
         : item.name === "GARDEN" ? `${item.current}/${item.max}` : "ACTIVE"
       : ready ? "READY" : isActiveBuff ? `${Math.ceil(item.current / 60)}s ACTIVE` : `${Math.ceil(item.current / 60)}s`;
 
-    meter.appendChild(fill);
-    row.append(label, meter, status);
-    container.appendChild(row);
+    if (!existing) {
+      meter.appendChild(fill);
+      row.append(label, meter, status);
+      container.appendChild(row);
+      cached.rows[index] = {row,label,meter,fill,status};
+    }
   });
 }
 
@@ -7812,7 +7884,7 @@ function queuePunchCooldown(f) {
 
 function beginPunchCooldown(f) {
   f.pendingPunchCooldown = false;
-  f.punchCooldown = Math.max(f.punchCooldown || 0, PUNCH_COOLDOWN_TICKS);
+  f.punchCooldown = Math.max(f.punchCooldown || 0, isHeianSukuna(f) ? 20 : PUNCH_COOLDOWN_TICKS);
   resetCombo(f);
 }
 
@@ -8019,7 +8091,23 @@ function handleThrowInput(f, requireButtons = true) {
   return startBackThrow(f, requireButtons);
 }
 
+function isHeianSukuna(f) {
+  return f?.technique === "shrine" && skinOf(f) === "default";
+}
+
+function getPunchArmCount(f) { return isHeianSukuna(f) ? 4 : 2; }
+
+function advancePunchArm(f) {
+  const count = getPunchArmCount(f);
+  f.punchArm = (f.nextPunchArm || 0) % count;
+  f.nextPunchArm = (f.punchArm + 1) % count;
+  return f.punchArm;
+}
+
+function getSukunaBarrageInterval(f) { return isHeianSukuna(f) ? 3 : SUKUNA_BARRAGE_HIT_INTERVAL; }
+
 function beginAttack(f, type) {
+  if (type === "light" || type === "heavy") advancePunchArm(f);
   f.attacking = type;
   f.attackFrame = 0;
   f.hasHit = false;
@@ -14294,8 +14382,8 @@ function startSukunaBarrage(attacker, defender, damage, knockback) {
   attacker.attackFrame = 0;
   attacker.hasHit = true;
   attacker.queuedAttack = null;
-  attacker.barrageTimer = SUKUNA_BARRAGE_DURATION_TICKS;
-  attacker.barrageDuration = SUKUNA_BARRAGE_DURATION_TICKS;
+  attacker.barrageDuration = isHeianSukuna(attacker) ? 24 : SUKUNA_BARRAGE_DURATION_TICKS;
+  attacker.barrageTimer = attacker.barrageDuration;
   attacker.barrageHitsDone = 0;
   attacker.barrageDamageRemaining = Math.max(SUKUNA_BARRAGE_HITS, Math.ceil(damage * 3.4));
   attacker.barrageKnockback = Math.max(knockback, 34);
@@ -14313,7 +14401,7 @@ function startSukunaBarrage(attacker, defender, damage, knockback) {
   defender.knockdown = false;
   defender.knockdownTimer = 0;
   defender.hurt = 10;
-  defender.stun = Math.max(defender.stun, SUKUNA_BARRAGE_DURATION_TICKS + 8);
+  defender.stun = Math.max(defender.stun, attacker.barrageDuration + 8);
   defender.grounded = defender.grounded || defender.y + defender.h >= GROUND - 4;
   defender.barrageLockY = defender.y;
   cancelRct(defender, false);
@@ -14351,9 +14439,10 @@ function updateSukunaBarrage(attacker, defender) {
 
   const elapsed = Math.max(0, (attacker.barrageDuration || SUKUNA_BARRAGE_DURATION_TICKS) - attacker.barrageTimer);
   const shouldHit = elapsed > 0
-    && elapsed % SUKUNA_BARRAGE_HIT_INTERVAL === 0
+    && elapsed % getSukunaBarrageInterval(attacker) === 0
     && attacker.barrageHitsDone < SUKUNA_BARRAGE_HITS;
   if (shouldHit) {
+    advancePunchArm(attacker);
     attacker.barrageHitsDone += 1;
     const hitsLeft = Math.max(1, SUKUNA_BARRAGE_HITS - attacker.barrageHitsDone + 1);
     const hitDamage = Math.max(1, Math.ceil(attacker.barrageDamageRemaining / hitsLeft));
@@ -19941,12 +20030,13 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
   const armSway = idleSway * 1.2;
   const punchDrive = pose === "punch" ? punch : 0;
 
-  // back (left) arm behind the torso
-  armRig(
-    { x: -15, y: -72 },
-    { x: -21 + punchDrive * 6, y: -56 + punchDrive * 4 },
-    { x: -16 - armSway + punchDrive * 14, y: -42 + punchDrive * 2 }
-  );
+  const activeRyukArm = options.punchArm === 1 ? 1 : 0;
+  const requestedHand = options.hand || (isRyuk && punchDrive > 0
+    ? {x:lerp(22,LIGHT_RYUK_REACH,punchDrive),y:lerp(-46,LIGHT_RYUK_HAND_Y,punchDrive)} : null);
+  const ryukArms = isRyuk ? getRyukPunchArms(requestedHand, activeRyukArm) : null;
+  // Rear arm remains attached, whether it is guarding or delivering the cross.
+  if (ryukArms) armRig(ryukArms[1].shoulder,ryukArms[1].elbow,ryukArms[1].fist);
+  else armRig({x:-15,y:-72},{x:-21,y:-56},{x:-16-armSway,y:-42});
 
   // legs: fighter-identical (outline 17 / color 11), idle stance offsets.
   // LEG_BOOT_PATCH: legs stop at the ankle and outlined boots wrap it,
@@ -20143,15 +20233,10 @@ function drawDeathNoteCharacterModel(kind, x, footY, scale = 1, options = {}) {
 
   }
 
-  // front (right) arm on top - drives the Ryuk punch
-  const hand = options.hand || (isRyuk
-    ? { x: lerp(22, LIGHT_RYUK_REACH, punchDrive), y: lerp(-46, LIGHT_RYUK_HAND_Y, punchDrive) }
-    : { x: 17 + armSway, y: -42 });
-  armRig(
-    { x: 16, y: -72 },
-    { x: (16 + hand.x) * 0.5 + 7, y: (-72 + hand.y) * 0.5 + 12 },
-    hand
-  );
+  // Only the selected arm extends; the other stays in guard.
+  const hand = ryukArms ? ryukArms[activeRyukArm].fist : {x:17+armSway,y:-42};
+  if (ryukArms) armRig(ryukArms[0].shoulder,ryukArms[0].elbow,ryukArms[0].fist);
+  else armRig({x:16,y:-72},{x:(16+hand.x)*.5+7,y:(-72+hand.y)*.5+12},hand);
   if (isRyuk) {
     // Knuckles stay connected to the wrist; there is no separate floating fist.
     ctx.fillStyle = materialGradient(palette.skin, hand.x - 8, hand.y - 8, hand.x + 8, hand.y + 8);
@@ -20247,7 +20332,7 @@ function drawLightRyukCompanion(f) {
   if (!isLight(f) || f.ko || f.lying || getActiveRyukStrike(f)) return;
   const pose = getLightMeleeRyukPose(f);
   drawDeathNoteCharacterModel("ryuk", pose.x, pose.y, LIGHT_RYUK_SCALE, {
-    dir: pose.dir, hand: pose.hand, alpha: 0.96
+    dir: pose.dir, hand: pose.hand, punchArm: f.punchArm, alpha: 0.96
   });
 }
 
@@ -20273,7 +20358,7 @@ function drawRyukStrike(p) {
       ctx.stroke();
     }
   }
-  drawDeathNoteCharacterModel("ryuk", pose.x, pose.y, LIGHT_RYUK_SCALE, { dir: pose.dir, hand: pose.hand, flight: travelling });
+  drawDeathNoteCharacterModel("ryuk", pose.x, pose.y, LIGHT_RYUK_SCALE, { dir: pose.dir, hand: pose.hand, punchArm: p.punchArm, flight: travelling });
   if (p.age >= p.startupMax && p.age < p.startupMax + p.activeTicks + 5) {
     const t = clamp01((p.age - p.startupMax) / (p.activeTicks + 5));
     ctx.strokeStyle = `rgba(231,219,255,${(1-t)*0.8})`;
@@ -22902,7 +22987,9 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
   ctx.restore();
 
   ctx.save();
-  ctx.translate(lean, 0);
+  ctx.translate(26 + lean, 74);
+  ctx.rotate(motion.tilt + (punchMotion?.tilt || 0) + idle * 0.008);
+  ctx.translate(-26, -74);
   // ARTANIS_HANDBLADE_PATCH: record each arm's elbow+hand as it's drawn so
   // the Zealot's psi blades can emit from the actual hands and follow the
   // hand movement, instead of fixed torso positions.
@@ -23017,37 +23104,8 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
     const attack = getAttackSpec(f);
     const windup = f.attackFrame < attack.windup;
     const active = f.attackFrame >= attack.windup && f.attackFrame <= attack.windup + attack.active;
-    if (f.attacking === "barrage") {
-      const barragePhase = f.attackFrame * 0.95;
-      const armSet = [
-        { shoulder: { x: 43, y: 49 }, elbowY: 45, handY: 39, delay: 0 },
-        { shoulder: { x: 11, y: 50 }, elbowY: 52, handY: 49, delay: 1.2 },
-        { shoulder: { x: 44, y: 64 }, elbowY: 66, handY: 62, delay: 2.4 },
-        { shoulder: { x: 9, y: 65 }, elbowY: 72, handY: 75, delay: 3.6 }
-      ];
-      // SKINS_PATCH: Shibuya Sukuna throws with just the one pair of arms.
-      (shibuyaSleeve ? armSet.slice(0, 2) : armSet).forEach((arm, index) => {
-        const thrust = Math.max(0, Math.sin(barragePhase + arm.delay));
-        const recoil = Math.max(0, -Math.sin(barragePhase + arm.delay)) * 5;
-        const reach = 52 + thrust * 27 - recoil;
-        const elbowX = 36 + thrust * 20 - index * 1.5;
-        const hand = { x: reach + index * 2, y: arm.handY + Math.sin(barragePhase + index) * 4 };
-        drawArmRig(
-          arm.shoulder,
-          { x: elbowX, y: arm.elbowY + Math.cos(barragePhase + index) * 2 },
-          hand,
-          shrineArmColor
-        );
-        if (thrust > 0.65) {
-          ctx.strokeStyle = `rgba(251, 146, 60, ${0.25 + thrust * 0.28})`;
-          ctx.lineWidth = 3;
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(hand.x - 16, hand.y);
-          ctx.lineTo(hand.x + 12, hand.y + (index % 2 === 0 ? -2 : 2));
-          ctx.stroke();
-        }
-      });
+    if (punchMotion) {
+      drawPunchArms(f, drawArmRig, punchMotion);
     } else if (f.attacking === "grabThrow") {
       const holdPulse = Math.sin(frame * 0.18) * 2;
       drawArmRig(
@@ -23151,10 +23209,6 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
         heavy ? { x: 84, y: 82 } : { x: 74, y: 74 },   // active: blade past the hip
         heavy ? { x: 58, y: 74 } : { x: 56, y: 70 }    // recovery
       );
-    } else if (punchMotion) {
-      shoulder = punchMotion.shoulder;
-      elbow = punchMotion.elbow;
-      fist = punchMotion.fist;
     } else {
       shoulder = { x: 42, y: 52 };
       elbow = { x: 54, y: 58 };
@@ -23202,8 +23256,7 @@ function drawFighter(f, label, labelColor = "rgba(244, 247, 251, 0.9)") {
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 },
       heavy ? { x: 34, y: 67 } : { x: 29, y: 61 }
     );
-    if (punchMotion) drawArmRig({x:11,y:52},{x:17,y:65},punchMotion.guard);
-    else drawArmRig(guardShoulder, guardElbow, guardFist);
+    drawArmRig(guardShoulder, guardElbow, guardFist);
     if (f.technique === "shrine" && !shibuyaSleeve) {
       const extraLift = blendValue(0, heavy ? -2 : -1, 1, 0);
       const extraReach = blendValue(0, -2, 4, 1);
@@ -26514,8 +26567,8 @@ function draw() {
     drawFighterBacklight(player);
     drawFighterBacklight(enemy);
   }
-  drawFighter(player, getPlayerLabel(), getPlayerLabelColor());
-  drawFighter(enemy, getEnemyLabel(), getEnemyLabelColor());
+  drawOnlineFighter(player, getPlayerLabel(), getPlayerLabelColor());
+  drawOnlineFighter(enemy, getEnemyLabel(), getEnemyLabelColor());
   drawVecnaMinions(); // VECNA_MINION_DRAW_PATCH: over fighters
   drawDavePeasAndAim(); // DAVE_PATCH: peas + placement ghost + crosshair
   drawUpsideDownSpider(); // VECNA_PATCH
@@ -26958,11 +27011,12 @@ function fixedUpdate() {
   updateHud();
 }
 
+let lastTechniquePreviewTime = 0;
 function loop(now) {
   const elapsed = Math.min(100, now - lastFrameTime);
   lastFrameTime = now;
 
-  if (paused) {
+  if (paused || (gameMode === "online" && onlineWaiting)) {
     fixedAccumulator = 0;
   } else {
     fixedAccumulator += elapsed;
@@ -26976,7 +27030,10 @@ function loop(now) {
   }
 
   draw();
-  if (!techniqueScreen.classList.contains("hidden")) renderTechniquePreviews();
+  if (!techniqueScreen.classList.contains("hidden") && now-lastTechniquePreviewTime >= 100) {
+    renderTechniquePreviews();
+    lastTechniquePreviewTime=now;
+  }
   sendOnlineInputTick();
   sendOnlineFighterState();
   sendOnlineState();
@@ -27353,6 +27410,10 @@ hostBattleButton.addEventListener("click", () => {
   connectOnline(room, "host");
 });
 joinBattleButton.addEventListener("click", () => {
+  if (!roomCodeInput.value.trim()) {
+    roomCodeInput.focus();
+    return;
+  }
   const room = cleanRoomCode(roomCodeInput.value, "battle");
   onlineRoom = room;
   roomCodeInput.value = roomCodeInput.value.trim() ? room : "";
