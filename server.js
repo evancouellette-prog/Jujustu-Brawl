@@ -32,7 +32,7 @@ function safeFilePath(urlPath) {
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, {"Content-Type":"application/json", "Cache-Control":"no-store"});
-    res.end(JSON.stringify({status:"ok",release:"punch-network-20260906"}));
+    res.end(JSON.stringify({status:"ok",release:"skins-radio-20260906"}));
     return;
   }
   const filePath = safeFilePath(req.url);
@@ -42,19 +42,45 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
+  fs.stat(filePath, (err, stat) => {
+    if (err || !stat.isFile()) {
       res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Not found");
       return;
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, {
+    const headers = {
       "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
-      "Cache-Control": "no-store"
-    });
-    res.end(data);
+      "Cache-Control": "no-store",
+      "Accept-Ranges": "bytes",
+      "Content-Length": stat.size
+    };
+    let start = 0, end = stat.size - 1, status = 200;
+    // HTML audio requests byte ranges when seeking beyond buffered music.
+    // Ignore unsupported/multipart ranges; serve single byte ranges exactly.
+    const range = req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
+    if (range) {
+      const first = range[1] ? Number(range[1]) : null;
+      const last = range[2] ? Number(range[2]) : null;
+      start = first === null ? Math.max(0, stat.size - (last || 0)) : first;
+      end = first === null || last === null ? stat.size - 1 : Math.min(last, stat.size - 1);
+      if ((!range[1] && !range[2]) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+          start > end || start >= stat.size || (first === null && !Number.isSafeInteger(last))) {
+        res.writeHead(416, {...headers, "Content-Range": `bytes */${stat.size}`, "Content-Length": 0});
+        res.end();
+        return;
+      }
+      status = 206;
+      headers["Content-Range"] = `bytes ${start}-${end}/${stat.size}`;
+      headers["Content-Length"] = end - start + 1;
+    }
+    res.writeHead(status, headers);
+    if (req.method === "HEAD" || stat.size === 0) { res.end(); return; }
+    const stream = fs.createReadStream(filePath, {start, end});
+    stream.on("error", () => res.destroy());
+    res.on("close", () => stream.destroy());
+    stream.pipe(res);
   });
 });
 
