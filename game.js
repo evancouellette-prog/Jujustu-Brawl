@@ -308,21 +308,26 @@ function saveSelectedSkins() {
   try { localStorage.setItem(SKINS_STORAGE_KEY, JSON.stringify(selectedSkins)); } catch (e) {}
 }
 function getSelectedSkin(technique) {
-  const list = CHARACTER_SKINS[technique];
-  if (!list) return "default";
-  const chosen = selectedSkins[technique];
-  return list.some(s => s.id === chosen) ? chosen : "default";
+  return validSkinId(technique, selectedSkins[technique]);
+}
+function validSkinId(technique, skinId) {
+  return CHARACTER_SKINS[technique]?.some(skin => skin.id === skinId) ? skinId : "default";
 }
 function setSelectedSkin(technique, skinId) {
-  selectedSkins[technique] = skinId;
+  selectedSkins[technique] = validSkinId(technique, skinId);
   saveSelectedSkins();
+  if (gameMode === "online" && (onlineRole === "p1" || onlineRole === "p2") &&
+      onlineTechniqueChoices[onlineRole] === technique) {
+    onlineSkinChoices[onlineRole] = getSelectedSkin(technique);
+    const fighter = onlineRole === "p1" ? player : enemy;
+    if (fighter?.technique === technique) fighter.skinId = onlineSkinChoices[onlineRole];
+    sendOnlineTechniqueChoice();
+  }
 }
-// Read a fighter's active skin (real fighters carry skinId; fall back to the
-// saved selection so previews and edge cases still work).
+// Every actor owns its outfit. Previews opt into the saved selection explicitly;
+// missing remote data must never borrow this browser's wardrobe.
 function skinOf(f) {
-  if (!f) return "default";
-  if (f.skinId) return f.skinId;
-  return getSelectedSkin(f.technique);
+  return validSkinId(f?.technique, f?.skinId);
 }
 // SKINS_PATCH: Shibuya Sukuna wears a full uniform - one pair of sleeved arms.
 function isShibuya(f) {
@@ -1206,6 +1211,7 @@ function updateBattleMusicState(restart = false) {
 }
 
 function setRadioTrack(index, autoplay = true, restart = true) {
+  if (normalizeTrackIndex(index) !== currentRadioTrackIndex) pendingRadioSeekPercent = null;
   currentRadioTrackIndex = normalizeTrackIndex(index);
   saveRadioTrackIndex();
 
@@ -1237,10 +1243,8 @@ function closeRadioScreen() {
   radioScreen.classList.add("hidden");
 }
 
-// RADIO_SEEK_RANGE_PATCH
-// Conflict-checked seek system.
-// The bug was caused by old/global music-start code firing on the progress bar.
-// This version only sets currentTime and never calls load(), setRadioTrack(), or restart paths while seeking.
+// Seek the current audio without reloading it. The server supports byte ranges
+// so the browser can fetch the chosen position before the whole song downloads.
 let pendingRadioSeekPercent = null;
 
 function getRadioAudio() {
@@ -1266,7 +1270,7 @@ function getRadioClickPercent(track, event) {
 
 function updateMusicProgressUi() {
   const song = getRadioAudio();
-  const duration = song?.duration || 0;
+  const duration = getRadioAudioDuration();
   const currentTime = song?.currentTime || 0;
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -1286,6 +1290,7 @@ function updateMusicProgressUi() {
 
   musicProgressTracks.forEach((track) => {
     track.setAttribute("aria-valuenow", String(Math.round(Math.max(0, Math.min(100, progress)))));
+    track.setAttribute("aria-valuetext", `${formatMusicTime(currentTime)} of ${formatMusicTime(duration)}`);
   });
 }
 
@@ -1311,16 +1316,15 @@ function applyRadioSeekPercent(percent) {
     return false;
   }
 
-  pendingRadioSeekPercent = null;
-  song.currentTime = Math.max(0, Math.min(duration - 0.05, cleanPercent * duration));
-  battleMusic = song;
-  updateMusicProgressUi();
-
-  // If it was already playing, keep it playing. Do not start/reload from 0.
-  if (backgroundMusicStarted && !musicMuted && song.paused) {
-    const playPromise = song.play();
-    if (playPromise) playPromise.catch(() => {});
+  try {
+    song.currentTime = cleanPercent * duration;
+  } catch (err) {
+    // Metadata can arrive before the media element permits its first seek.
+    pendingRadioSeekPercent = cleanPercent;
+    return false;
   }
+  pendingRadioSeekPercent = null;
+  updateMusicProgressUi();
 
   return true;
 }
@@ -1352,11 +1356,14 @@ function installRadioSeekListeners() {
 
     track.style.cursor = "pointer";
     track.style.pointerEvents = "auto";
+    track.setAttribute("role", "slider");
+    track.tabIndex = 0;
 
     const fill = track.querySelector(".music-progress-fill");
     if (fill) fill.style.pointerEvents = "none";
 
     track.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.isPrimary === false) return;
       // Seek immediately on pointerdown so it feels responsive.
       seekRadioFromTrack(track, event);
     }, true);
@@ -1365,6 +1372,19 @@ function installRadioSeekListeners() {
       // Click backup for browsers that don't fire pointerdown normally.
       seekRadioFromTrack(track, event);
     }, true);
+    track.addEventListener("keydown", (event) => {
+      const duration = getRadioAudioDuration();
+      if (!duration) return;
+      let time = getRadioAudio().currentTime;
+      if (event.key === "ArrowRight" || event.key === "ArrowUp") time += 5;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowDown") time -= 5;
+      else if (event.key === "Home") time = 0;
+      else if (event.key === "End") time = duration;
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+      applyRadioSeekPercent(time / duration);
+    });
   });
 }
 
@@ -1383,6 +1403,7 @@ battleMusic.addEventListener("ended", () => {
   playNextSong();
 });
 battleMusic.addEventListener("error", () => {
+  pendingRadioSeekPercent = null;
   const track = getCurrentRadioTrack();
   try {
     if (track?.src) failedRadioAudioSrcs.add(new URL(track.src, window.location.href).href);
@@ -3817,6 +3838,7 @@ function makeFighter(config) {
     knockbackTakenMultiplier: 1,
     outgoingDamageMultiplier: 1,
     technique: "limitless",
+    skinId: "default",
     techniqueCooldown: 0,
     techniqueCooldownMax: TECHNIQUE_FAST_COOLDOWN,
     chargingTechnique: 0,
@@ -5851,14 +5873,17 @@ function updateOnlineWaiting() {
   sendOnlineTechniqueChoice();
 }
 
-function applyOnlineTechniqueChoice(role, technique, reason = "") {
+function applyOnlineTechniqueChoice(role, technique, reason = "", skinId) {
   if ((role !== "p1" && role !== "p2") || !isValidTechnique(technique)) return;
   const changed = onlineTechniqueChoices[role] !== technique;
   onlineTechniqueChoices[role] = technique;
+  onlineSkinChoices[role] = validSkinId(technique,
+    skinId === undefined && !changed ? onlineSkinChoices[role] : skinId);
   if (changed) console.log("[online technique]", { role, technique, reason });
 
   if (gameMode !== "online" || !player || !enemy) return;
   const fighter = role === "p1" ? player : enemy;
+  fighter.skinId = onlineSkinChoices[role];
   if (!changed && fighter.technique === technique) return;
   fighter.technique = technique;
   applyTechniqueStats(fighter, true);
@@ -5871,7 +5896,8 @@ function sendOnlineTechniqueChoice() {
   if (onlineRole !== "p1" && onlineRole !== "p2") return;
   const technique = onlineTechniqueChoices[onlineRole] || selectedTechnique;
   if (!isValidTechnique(technique)) return;
-  onlineSocket.send(JSON.stringify({ type: "technique", role: onlineRole, technique, skinId:getSelectedSkin(technique) }));
+  onlineSocket.send(JSON.stringify({ type: "technique", role: onlineRole, technique,
+    skinId: validSkinId(technique, onlineSkinChoices[onlineRole]) }));
 }
 
 function sendOnlinePause(value) {
@@ -5918,7 +5944,6 @@ function syncRemoteDamageToLocalJoiner(remoteEnemy) {
   if (!remoteEnemy || !enemy) return;
 
   // Keep identity/stat fields in sync without touching local combo/attack timing.
-  if (isValidTechnique(remoteEnemy.technique)) onlineTechniqueChoices.p2 = remoteEnemy.technique;
   enemy.maxHealth = Number.isFinite(Number(remoteEnemy.maxHealth)) ? Number(remoteEnemy.maxHealth) : enemy.maxHealth;
   enemy.healthBars = Number.isFinite(Number(remoteEnemy.healthBars)) ? Number(remoteEnemy.healthBars) : enemy.healthBars;
   enemy.maxCe = Number.isFinite(Number(remoteEnemy.maxCe)) ? Number(remoteEnemy.maxCe) : enemy.maxCe;
@@ -5965,6 +5990,7 @@ function syncHostPlayerToJoiner(remotePlayer) {
   // screen even while the host was moving normally on their own screen.
   recordOnlineMotion(player, remotePlayer);
   Object.assign(player, remotePlayer);
+  applyOnlineTechniqueChoice("p1", remotePlayer.technique, "host state", remotePlayer.skinId);
   syncDeathNoteWritingEffect(player);
 }
 
@@ -5974,7 +6000,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
   // P2 is the owner of `enemy`. Use their fighter packet for short combat
   // windows that are easy to miss through plain key-input messages.
   const fields = [
-    "x", "y", "vx", "vy", "dir", "grounded", "jumpsUsed", "onPlatform", "skinId", "walkCycle",
+    "x", "y", "vx", "vy", "dir", "grounded", "jumpsUsed", "onPlatform", "walkCycle",
     "attacking", "attackFrame", "punchArm", "nextPunchArm", "hasHit", "queuedAttack", "pendingPunchCooldown", "punchCooldown",
     "comboCount", "comboTimer", "comboChainTimer", "comboLightsUsed", "comboHeavyUsed", "lastAttackType",
     "blocking", "rctHealing", "chargingTechnique", "chargeTicks", "techniqueAim",
@@ -6021,8 +6047,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
   syncDeathNoteWritingEffect(enemy);
 
   if (isValidTechnique(remoteFighter.technique)) {
-    enemy.technique = remoteFighter.technique;
-    onlineTechniqueChoices.p2 = remoteFighter.technique;
+    applyOnlineTechniqueChoice("p2", remoteFighter.technique, "joiner state", remoteFighter.skinId);
   }
 }
 
@@ -6087,7 +6112,9 @@ if (data.type === "role") {
       const lostPeer = bothOnlinePlayersPresent() && (!data.players?.p1 || !data.players?.p2);
       onlinePlayers = data.players;
       if (lostPeer) {
-        onlineTechniqueChoices[onlineRole === "p1" ? "p2" : "p1"] = null;
+        const peerRole = onlineRole === "p1" ? "p2" : "p1";
+        onlineTechniqueChoices[peerRole] = null;
+        onlineSkinChoices[peerRole] = "default";
         resetGame();
       }
       updateOnlineWaiting();
@@ -6100,11 +6127,8 @@ if (data.type === "role") {
     }
 
     if (data.type === "technique") {
-      applyOnlineTechniqueChoice(data.role, data.technique, "remote choice");
-      const fighter = data.role === "p1" ? player : enemy;
-      if (CHARACTER_SKINS[data.technique]?.some(skin => skin.id === data.skinId)) {
-        onlineSkinChoices[data.role] = data.skinId;
-        fighter.skinId = data.skinId;
+      if (data.role !== onlineRole) {
+        applyOnlineTechniqueChoice(data.role, data.technique, "remote choice", data.skinId);
       }
       return;
     }
@@ -6199,9 +6223,6 @@ if (data.type === "role") {
     }
 
     if (onlineRole === "p1" && data.type === "fighter") {
-      if (data.fighter && data.fighter.technique) {
-        applyOnlineTechniqueChoice("p2", data.fighter.technique, "fighter state");
-      }
       applyJoinerFighterStateOnHost(data.fighter);
       return;
     }
@@ -6222,6 +6243,10 @@ if (data.type === "role") {
         syncRemoteDamageToLocalJoiner(data.enemy);
       } else {
         Object.assign(enemy, data.enemy);
+      }
+      if (onlineRole !== "p2") {
+        applyOnlineTechniqueChoice("p1", data.player.technique, "spectator state", data.player.skinId);
+        applyOnlineTechniqueChoice("p2", data.enemy.technique, "spectator state", data.enemy.skinId);
       }
 
       if (data.player && isValidTechnique(data.player.technique)) {
@@ -6748,8 +6773,8 @@ function resetRoundActors() {
   player.skinId = getSelectedSkin(player.technique);
   enemy.skinId = getSelectedSkin(enemy.technique);
   if (gameMode === "online") {
-    player.skinId = onlineSkinChoices.p1 || "default";
-    enemy.skinId = onlineSkinChoices.p2 || "default";
+    player.skinId = validSkinId(player.technique, onlineSkinChoices.p1);
+    enemy.skinId = validSkinId(enemy.technique, onlineSkinChoices.p2);
   }
   applyTechniqueStats(player);
   applyTechniqueStats(enemy);
