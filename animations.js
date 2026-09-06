@@ -45,7 +45,54 @@ function getFighterMotion(f) {
     squash:landing*0.055,armSwing:Math.cos(phase)*blend};
 }
 
+// Two fixed-length bones, one elbow bend: never stretch an arm to reach a pose.
+function solvePunchArm(shoulder, target, upper = 23, forearm = 25) {
+  const coincident = target.x === shoulder.x && target.y === shoulder.y;
+  const dx = coincident ? 1 : target.x - shoulder.x, dy = target.y - shoulder.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const reach = Math.max(Math.abs(upper - forearm) + 1, Math.min(upper + forearm - 1, distance));
+  const ux = dx / distance, uy = dy / distance;
+  const along = (upper * upper - forearm * forearm + reach * reach) / (2 * reach);
+  const bend = Math.sqrt(Math.max(0, upper * upper - along * along));
+  // Keep one bend direction throughout the strike; changing IK branches snaps elbows.
+  const side = 1;
+  return { shoulder, elbow: {x: shoulder.x + ux * along - uy * bend * side, y: shoulder.y + uy * along + ux * bend * side},
+    fist: {x: shoulder.x + ux * reach, y: shoulder.y + uy * reach} };
+}
+
+function getPunchRig(f, load, drive, heavy = false) {
+  const count = getPunchArmCount(f);
+  const activeArm = (f.punchArm || 0) % count;
+  const cross = activeArm % 2 === 1;
+  const turn = cross ? drive * 0.78 : -drive * 0.08;
+  const ready = Math.max(load, drive);
+  const rests = [{x:46,y:81},{x:7,y:81},{x:45,y:88},{x:8,y:89}];
+  const arms = rests.slice(0, count).map((rest, index) => {
+    const rear = index % 2 === 1, lower = index >= 2;
+    const shoulder = {x: (rear ? 11 : 42) + (rear ? 29 : -22) * turn, y: (lower ? 65 : 51) - drive * 2};
+    const guard = {x: shoulder.x + (rear ? 5 : 3), y: shoulder.y - (lower ? 1 : 6)};
+    let target = {x: lerp(rest.x, guard.x, ready), y: lerp(rest.y, guard.y, ready)};
+    if (index === activeArm) {
+      const cock = {x: shoulder.x + (heavy ? -5 : 5), y: shoulder.y + (heavy ? 5 : -3)};
+      const contact = {x: shoulder.x + (heavy ? 44 : 42), y: shoulder.y - (lower ? 10 : heavy ? 7 : 2)};
+      target = {x: rest.x + (cock.x-rest.x)*load + (contact.x-rest.x)*drive,
+        y: rest.y + (cock.y-rest.y)*load + (contact.y-rest.y)*drive};
+    }
+    return {...solvePunchArm(shoulder, target), index, striking: index === activeArm};
+  });
+  const active = arms[activeArm];
+  return {load, drive, activeArm, arms, ...active,
+    tilt: -load * (heavy ? 0.09 : 0.04) + drive * (heavy ? 0.13 : cross ? 0.09 : 0.05)};
+}
+
 function getPunchMotion(f) {
+  if (f.attacking === 'barrage') {
+    const elapsed = Math.max(0, (f.barrageDuration || SUKUNA_BARRAGE_DURATION_TICKS) - f.barrageTimer - 1);
+    const interval = getSukunaBarrageInterval(f);
+    const phase = Math.max(0, elapsed - (f.barrageHitsDone || 0)*interval);
+    const drive = f.barrageHitsDone > 0 ? 1-motionEase(phase/Math.max(1,interval-1)) : 0;
+    return getPunchRig(f, 0, drive);
+  }
   const spec = getAttackSpec(f);
   if (!spec || !['light','heavy'].includes(f.attacking)) return null;
   const heavy = f.attacking === 'heavy', age=f.attackFrame;
@@ -54,13 +101,27 @@ function getPunchMotion(f) {
   const strike=motionEase((age-windupEnd)/Math.max(1,spec.windup-windupEnd));
   const recover=motionEase((age-spec.windup-spec.active)/Math.max(1,spec.recovery));
   const load=anticipation*(1-strike), drive=strike*(1-recover);
-  const rest={x:46,y:81}, cock=heavy?{x:24,y:43}:{x:39,y:48};
-  const target=heavy?{x:81,y:46}:{x:75,y:55};
-  return {load,drive,tilt:-load*(heavy?0.12:0.05)+drive*(heavy?0.16:0.08),
-    shoulder:{x:42+drive*2,y:52-drive*(heavy?3:0)},
-    elbow:{x:48-load*11+drive*13,y:68-load*18-drive*15},
-    fist:{x:rest.x+(cock.x-rest.x)*load+(target.x-rest.x)*drive,y:rest.y+(cock.y-rest.y)*load+(target.y-rest.y)*drive},
-    guard:{x:lerp(7,29,Math.max(load,drive)),y:lerp(81,54,Math.max(load,drive))}};
+  return getPunchRig(f, load, drive, heavy);
+}
+
+function drawPunchArms(f, drawArm, motion) {
+  // Guarding arms first, the single striking arm last. No duplicate arm pass.
+  for (const arm of [...motion.arms.filter(a=>!a.striking), motion.arms[motion.activeArm]]) {
+    drawArm(arm.shoulder, arm.elbow, arm.fist);
+  }
+}
+
+function getRyukPunchArms(hand, activeArm = 0) {
+  const drive = hand ? clamp01((hand.x-22)/(LIGHT_RYUK_REACH-22)) : 0;
+  const cross = activeArm === 1;
+  return [0,1].map(index => {
+    const rear = index === 1;
+    const shoulder = {x: (rear ? -15 : 16) + (cross ? (rear ? 31 : -24)*drive : 0), y:-72};
+    let target = {x:rear?-16:22,y:-46};
+    if (hand && index === activeArm) target = {...hand, x:hand.x-(rear?38*(1-drive):0)};
+    else if (hand) target = {x:lerp(target.x,shoulder.x+3,drive),y:lerp(-46,-80,drive)};
+    return solvePunchArm(shoulder,target,27,28);
+  });
 }
 
 function drawMovingArms(f,drawArm,skin,motion) {
