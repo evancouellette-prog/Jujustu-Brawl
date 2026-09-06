@@ -839,6 +839,9 @@ function updateControlsPanelKeybindLabels() {
   // Both entry points now render the same technique-aware content; only
   // the movement/attack/defend rows honor rebound keys.
   const technique = getControlledTechniqueForControls();
+  const signature = technique + JSON.stringify(keyBindings);
+  if (controlsGrid.dataset.controlsSignature === signature) return;
+  controlsGrid.dataset.controlsSignature = signature;
   const extraHtml = getExtraBattleControlHtml(technique);
   controlsGrid.innerHTML = `
     <p><strong>Move</strong>
@@ -1836,6 +1839,7 @@ const STAGES = {
 const STAGE_ORDER = ["city", "zen", "protoss", "village", "rooftops", "sunny", "upsideDown", "space"];
 let currentStageId = "city";
 let stageHazardsEnabled = false;
+let localStageSettings = {stage:"city", hazards:false};
 let stageHazards = []; // active hazard instances
 let stageHazardTimer = 0;
 
@@ -1936,10 +1940,10 @@ const GOJO_BLUE_PUNCH_ACTIVE_TICKS = 10 * 60;
 const GOJO_BLUE_PUNCH_COOLDOWN_TICKS = 10 * 60;
 const GOJO_BLUE_PUNCH_MAX_CHASES = 3;
 const GOJO_LIGHT_FINISHER_COOLDOWN_TICKS = 5 * 60;
-const ULT_AIM_MIN_HOLD_TICKS = 150;
-const ULT_AIM_TOTAL_TICKS = 150;
-const ULT_AIM_HOLD_TICKS = 150;
-const ULT_FINAL_CHARGE_TICKS = 0;
+const ULT_AIM_MIN_HOLD_TICKS = 90;
+const ULT_AIM_TOTAL_TICKS = 90;
+const ULT_AIM_HOLD_TICKS = 90;
+const ULT_FINAL_CHARGE_TICKS = 15;
 const ULT_AIM_PREVIEW_ALPHA = 0.5;
 const ULT_PLATFORM_BREAK_RADIUS = 70;
 const PRACTICE_DUMMY_AUTO_KNOCKBACK_DEFAULT = true;
@@ -3716,6 +3720,8 @@ function getCameraTargetX() {
 }
 
 function getCameraFightCenter() {
+  const chargeFocus = [player, enemy].find(f => f?.ultimateFinalCharge > 0);
+  if (chargeFocus) return chargeFocus.x + chargeFocus.w / 2 + (chargeFocus.technique === "limitless" ? chargeFocus.dir * 35 : 0);
   if (cinematicZoomTicks > 0 && ultimateFocusOwner) {
     const focus = ultimateFocusOwner === "player" ? player : enemy;
     if (focus) return focus.x + focus.w / 2;
@@ -3732,7 +3738,7 @@ function getCameraTargetZoom() {
   const desiredWorldWidth = Math.min(STAGE_W, Math.max(W, maxX - minX + 260));
   const minZoom = W / STAGE_W;
   const baseZoom = Math.max(minZoom, Math.min(1, W / desiredWorldWidth));
-  if (cinematicZoomTicks > 0 && ultimateFocusOwner) return Math.max(minZoom, Math.min(1.2, Math.max(baseZoom, baseZoom * 1.18)));
+  if ([player,enemy].some(f => f?.ultimateFinalCharge > 0) || (cinematicZoomTicks > 0 && ultimateFocusOwner)) return Math.max(minZoom, Math.min(1.2, baseZoom * 1.18));
   return baseZoom;
 }
 
@@ -3760,12 +3766,12 @@ function updateCamera(snap = false) {
   } else if (targetZoom < cameraZoom) {
     cameraZoom = targetZoom;
   } else {
-    cameraZoom += (targetZoom - cameraZoom) * 0.035;
+    cameraZoom += (targetZoom - cameraZoom) * ([player,enemy].some(f => f?.ultimateFinalCharge > 0) ? 0.18 : 0.035);
   }
 
   const targetX = getCameraTargetX();
   cameraX = snap ? targetX : cameraX + (targetX - cameraX) * 0.14;
-  keepFightersInCamera();
+  if (![player,enemy].some(f => f?.ultimateFinalCharge > 0) && cinematicZoomTicks <= 0) keepFightersInCamera();
 }
 
 let projectiles = [];
@@ -3860,6 +3866,7 @@ function makeFighter(config) {
     gojoPushPullAnchorY: null,
     gojoPushPullCooldown: 0,
     fugaAiming: false,
+    fugaReleaseQueued: false,
     fugaChargeTicks: 0,
     fugaCooldown: 0,
     fugaCooldownMax: FUGA_COOLDOWN_TICKS,
@@ -5580,7 +5587,7 @@ function getControlledTechniqueForControls() {
 
 function getTechniqueControlHtml(technique) {
   if (technique === "shrine") {
-    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Hold S</kbd> Fuga</span><span><kbd>Hold C</kbd> Aim Ultimate</span><span><kbd>R</kbd> hold RCT</span>';
+    return '<span><kbd>Left Click</kbd> Dismantle</span><span><kbd>Right Click</kbd> Cleave</span><span><kbd>Hold S</kbd> Fuga</span><span><kbd>C</kbd> World Cutting Slash</span><span><kbd>R</kbd> hold RCT</span>';
   }
   if (technique === "deathnote") {
     return '<span><kbd>Left Click</kbd> Shinigami Strike</span><span><kbd>Right Click</kbd> Name Investigation</span><span><kbd>S</kbd> Potato Chip</span><span><kbd>C</kbd> Death Note</span>';
@@ -5621,7 +5628,7 @@ function getTechniqueControlHtml(technique) {
     // AKIRA_PATCH: bucket-list brawler.
     return '<span><kbd>Left Click</kbd> Joy Ride</span><span><kbd>Right Click</kbd> Volt Punch</span><span><kbd>S</kbd> Overtime (build Work)</span><span><kbd>R</kbd> Cold Beer (heal)</span><span><kbd>F</kbd> Shark Suit</span><span><kbd>T</kbd> Bucket List notebook</span><span><kbd>C</kbd> Bucket List! (ult)</span>';
   }
-  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Hold S</kbd> Teleport</span><span><kbd>Hold T</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>Hold C</kbd> Aim Ultimate</span><span><kbd>R</kbd> hold RCT</span>';
+  return '<span><kbd>Left Click</kbd> Blue</span><span><kbd>Right Click</kbd> Red</span><span><kbd>Hold S</kbd> Teleport</span><span><kbd>Hold T</kbd> Blue Punch</span><span><kbd>F</kbd> Infinity</span><span><kbd>C</kbd> Hollow Purple</span><span><kbd>R</kbd> hold RCT</span>';
 }
 
 function getExtraBattleControlHtml(technique) {
@@ -5720,45 +5727,66 @@ function resetGame() {
   startRound(pacifistBot && !homeOpen ? "playing" : "lobby");
 }
 
-function openHomeScreen() {
+function resetBattleSession(mode = "cpu", practice = false) {
+  const previousSocket = onlineSocket;
+  onlineSocket = null; // Invalidate callbacks before close can fire.
+  if (previousSocket) previousSocket.close();
+  gameMode = mode;
+  onlineRole = null;
+  onlineConnected = false;
+  onlinePlayers = {p1:0,p2:0};
+  onlineTechniqueChoices = {p1:null,p2:null};
+  onlineSkinChoices = {p1:"default",p2:"default"};
+  onlinePlayerNames = {p1:"Player 1",p2:"Player 2"};
+  onlinePickedTechnique = false;
+  onlineWaiting = false;
+  remoteInput = {left:false,right:false,up:false,down:false,block:false,rct:false,heavy:false,bluePunch:false};
+  lastOnlineStateSent = lastOnlineInputSent = lastOnlineFighterSent = 0;
+  lastOnlineInputKey = "";
+  joinerLocalHitLockTicks = 0;
+  pendingStartPractice = pacifistBot = Boolean(practice);
+  selectedTechnique = "limitless";
+  currentStageId = localStageSettings.stage;
+  stageHazardsEnabled = localStageSettings.hazards;
+  cpuOpponentTechniqueLocked = false;
   homeOpen = true;
   paused = false;
   gameOver = true;
-  setGameState("home", "open home");
-  roundEnding = false;
-  roundResolved = false;
-  koWinner = null;
-  onlineRole = null;
-  onlineConnected = false;
-  onlinePlayers = { p1: 0, p2: 0 };
-  onlineTechniqueChoices = { p1: null, p2: null };
-  onlineSkinChoices = { p1: "default", p2: "default" };
-  onlinePickedTechnique = false;
-  cpuOpponentTechniqueLocked = false;
-  resetReadyPhase("home");
-  lastRoundWinner = null;
-  if (onlineSocket) onlineSocket.close();
-  onlineSocket = null;
-  clearInterval(readyCountdownId);
+  roundEnding = roundResolved = false;
+  currentRound = 1;
+  playerRounds = enemyRounds = 0;
+  lastRoundWinner = koWinner = null;
   keys.clear();
-  message.classList.add("hidden");
-  updateReadyPromptVisibility();
-  pauseScreen.classList.add("hidden");
-  if (practiceSettingsScreen) practiceSettingsScreen.classList.add("hidden");
-  techniqueScreen.classList.add("hidden");
+  clearInterval(readyCountdownId);
+  resetReadyPhase("new session");
+  setGameState("home", "new session");
+  hitStopTicks = shake = fixedAccumulator = 0;
+  cameraX = 0;
+  cameraZoom = 1;
+  frame = 0;
+  actionWarning = null;
+  akiraNotebookOpen = false;
+  resetRoundActors();
   resetPracticeDamage();
+  for (const id of ["pauseScreen","techniqueScreen","waitingScreen","practiceSettingsScreen","radioScreen","settingsScreen","keybindScreen","movesetsScreen"]) {
+    document.getElementById(id)?.classList.add("hidden");
+  }
+  document.getElementById("skinsScreen")?.classList.remove("show");
+  message.classList.add("hidden");
+  updateStageSelectionControls();
   updateControlsVisibility();
-  hideWaiting();
+  updateHud();
+}
+
+function openHomeScreen() {
+  resetBattleSession(selectedMode);
   homeScreen.classList.remove("hidden");
 }
 
+
 function startFromHome(practiceMode) {
-  pendingStartPractice = practiceMode;
-  cpuOpponentTechniqueLocked = false;
-  if (!practiceMode) {
-    selectedMode = "cpu";
-    updateHomeModeButtons();
-  }
+  resetBattleSession(practiceMode ? "cpu" : selectedMode, practiceMode);
+  updateHomeModeButtons();
   homeScreen.classList.add("hidden");
   if (practiceSettingsScreen) practiceSettingsScreen.classList.add("hidden");
   techniqueScreen.classList.remove("hidden");
@@ -5898,6 +5926,47 @@ function sendOnlineTechniqueChoice() {
   if (!isValidTechnique(technique)) return;
   onlineSocket.send(JSON.stringify({ type: "technique", role: onlineRole, technique,
     skinId: validSkinId(technique, onlineSkinChoices[onlineRole]) }));
+  sendOnlineStageChoice();
+}
+
+function canChooseStage() { return gameMode !== "online" || onlineRole === "p1"; }
+
+function updateStageSelectionControls() {
+  const allowed = canChooseStage();
+  document.querySelectorAll(".stage-chip").forEach(chip => {
+    chip.disabled = !allowed;
+    chip.classList.toggle("active", chip.dataset.stage === currentStageId);
+  });
+  const toggle = document.getElementById("stageHazardToggle");
+  if (toggle) { toggle.disabled = !allowed; toggle.checked = stageHazardsEnabled; }
+  const title = document.querySelector(".stage-title");
+  if (title) title.textContent = allowed ? "Stage" : "Stage · chosen by host";
+}
+
+function chooseStage(stage, hazards = stageHazardsEnabled) {
+  if (!canChooseStage() || !STAGES[stage]) { updateStageSelectionControls(); return false; }
+  currentStageId = stage;
+  stageHazardsEnabled = Boolean(hazards);
+  if (gameMode !== "online") localStageSettings = {stage, hazards:stageHazardsEnabled};
+  updateStageSelectionControls();
+  sendOnlineStageChoice();
+  return true;
+}
+
+function sendOnlineStageChoice() {
+  if (gameMode !== "online" || onlineRole !== "p1" || !canSendOnlinePacket(true)) return;
+  onlineSocket.send(JSON.stringify({type:"stage",role:"p1",stage:currentStageId,hazards:stageHazardsEnabled}));
+}
+
+function applyOnlineStageChoice(data) {
+  if (gameMode !== "online" || onlineRole === "p1" || data.role !== "p1" || !STAGES[data.stage]) return;
+  if (currentStageId !== data.stage) {
+    currentStageId = data.stage;
+    platforms = makeStagePlatforms(currentStageId);
+    stageHazards = [];
+  }
+  stageHazardsEnabled = Boolean(data.hazards);
+  updateStageSelectionControls();
 }
 
 function sendOnlinePause(value) {
@@ -5922,6 +5991,8 @@ function startOnlineGame(role) {
   homeOpen = false;
   paused = false;
   gameMode = "online";
+  updateStageSelectionControls();
+  sendOnlineStageChoice();
   setGameState("lobby", "online role assigned");
   pacifistBot = false;
   homeScreen.classList.add("hidden");
@@ -5967,6 +6038,9 @@ function syncRemoteDamageToLocalJoiner(remoteEnemy) {
     enemy.knockdownTimer = Math.max(enemy.knockdownTimer || 0, remoteEnemy.knockdownTimer || 0);
     if (Number.isFinite(Number(remoteEnemy.vx))) enemy.vx = Number(remoteEnemy.vx);
     if (Number.isFinite(Number(remoteEnemy.vy))) enemy.vy = Number(remoteEnemy.vy);
+  } else if (!remotelyHit && !isHeldBySpecial(enemy)) {
+    enemy.hurt = enemy.stun = enemy.knockdownTimer = 0;
+    enemy.knockdown = false;
   }
 
 
@@ -6007,7 +6081,7 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
     "barrageTimer", "barrageDuration", "barrageHitsDone", "barrageDamageRemaining", "barrageKnockback", "barrageDir", "barrageTarget", "barrageLockX", "barrageLockY",
     "grabThrowTimer", "grabThrowDuration", "grabThrowDir", "grabThrowTarget", "grabThrowAim", "grabThrowLockX", "grabThrowLockY",
     "bluePunchHoldTicks", "bluePunchActiveTicks", "bluePunchCooldown", "bluePunchChases", "bluePunchFlash",
-    "castPoseMove", "castPoseTicks", "castPoseAngle", "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimPoint",
+    "castPoseMove", "castPoseTicks", "castPoseAngle", "teleportAiming", "teleportCooldown", "fugaAiming", "fugaChargeTicks", "fugaCooldown", "fugaCooldownMax", "ultimateAiming", "ultimateAimTicks", "ultimateFinalCharge", "ultimateAimPoint",
     "ce", "maxCe", "ultimateMeter", "domainStartup", "domainAttemptType", "simpleDomainTicks", "simpleDomainFlash", "simpleDomainCooldown",
     "bindingVowType", "bindingVowTicks", "bindingVowCooldown", "bindingVowChoiceTicks", "bindingVowQuote", "bindingVowQuoteTicks", "bindingVowFlash", "sukunaThrowComboCooldown",
     "informationMeter", "identityProgress", "lightSummonStage", "lightSummonType", "lightSummonHealth", "lightSummonMaxHealth", "lightSummonTicks", "lightSummonHitFlash", "lightSummonAnchorX", "lightSummonAnchorY", "lightSummonAnchorDir", "potatoCooldown", "potatoFocusTicks", "potatoVulnerableTicks", "potatoEatingTicks", "deathNoteCastId", "ultimateStartup", "ultimateRecovery", "ultimateMove", "ultimateHasReleased", "lightSummonFallVy", "lightRyukCooldown", "lightRyukCooldownMax", "lightInvestigationCooldown", "lightInvestigationCooldownMax", "eyeDealUsed", "eyeDealGlowTicks", "deathNoteSlowTicks", "deathNoteFearTicks", "ctLockTimer",
@@ -6052,9 +6126,12 @@ function applyJoinerFighterStateOnHost(remoteFighter) {
 }
 
 function connectOnline(room = onlineRoom, side = onlineSide) {
-  if (onlineSocket) onlineSocket.close();
+  resetBattleSession("online");
   onlineRoom = cleanRoomCode(room);
   onlineSide = side;
+  homeOpen = false;
+  homeScreen.classList.add("hidden");
+  showWaiting(side === "join" ? "Waiting For Host" : "Waiting For Player 2", "Connect with the same battle code. Either player can arrive first.");
   onlineRole = null;
   onlineConnected = false;
   onlinePlayers = { p1: 0, p2: 0 };
@@ -6135,13 +6212,7 @@ if (data.type === "role") {
 
     // STAGE_SELECT_PATCH: host is authoritative for stage + hazards.
     if (data.type === "stage") {
-      if (data.role === "p1" || onlineRole === "p2") {
-        if (STAGES[data.stage]) currentStageId = data.stage;
-        if (typeof data.hazards === "boolean") stageHazardsEnabled = data.hazards;
-        document.querySelectorAll(".stage-chip").forEach((c) => c.classList.toggle("active", c.dataset.stage === currentStageId));
-        const cb = document.getElementById("stageHazardToggle");
-        if (cb) cb.checked = stageHazardsEnabled;
-      }
+      applyOnlineStageChoice(data);
       return;
     }
 
@@ -6199,7 +6270,10 @@ if (data.type === "role") {
       if (data.action === "bindingVowOpen") openBindingVowChoice(enemy);
       if (data.action === "bindingVowSelect") activateBindingVow(enemy, data.vowType);
       if (data.action === "ultimate") startUltimate(enemy);
-      if (data.action === "ultimate-start") beginUltimateAim(enemy, data.aim);
+      if (data.action === "ultimate-start" && !isUltimateLocked(enemy)) {
+        enemy.ultimateMeter = MAX_ULTIMATE;
+        beginUltimateAim(enemy, data.aim);
+      }
       if (data.action === "ultimate-release") releaseUltimateAim(enemy, data.aim);
       if (data.action === "fuga-start") prepareFuga(enemy, data.aim);
       if (data.action === "fuga") {
@@ -6234,6 +6308,8 @@ if (data.type === "role") {
 
     if (onlineRole !== "p1" && data.type === "state") {
       if (!data.player || !data.enemy) return;
+      if (data.stage) applyOnlineStageChoice({role:"p1",stage:data.stage,hazards:data.hazards});
+      if (data.stageHazards) stageHazards = data.stageHazards;
       // P2 controls `enemy` locally. Do NOT blindly overwrite local combat timing
       // from the host snapshot every frame.
       if (onlineRole === "p2") syncHostPlayerToJoiner(data.player);
@@ -6415,8 +6491,8 @@ function handleTechniqueMouseUp(event) {
       fighter.teleportAiming = true;
       fighter.techniqueAim = sanitizeAimPoint(aim) || fighter.techniqueAim;
     }
-    clearSpecialHoldState(fighter);
     performTeleport(fighter, aim);
+    clearSpecialHoldState(fighter);
     if (gameMode === "online" && onlineRole === "p2") sendOnlineInput("teleport", aim);
     return;
   }
@@ -6427,11 +6503,10 @@ function handleTechniqueMouseUp(event) {
     if (isOnlineJoinerControlledFighter(fighter)) {
       fighter.fugaAiming = true;
       fighter.techniqueAim = sanitizeAimPoint(aim) || fighter.techniqueAim;
-      fighter.fugaChargeTicks = Math.max(fighter.fugaChargeTicks || 0, getFugaRequiredChargeTicks(fighter));
     }
+    const fired = startFuga(fighter, aim);
     clearSpecialHoldState(fighter);
-    startFuga(fighter, aim);
-    if (gameMode === "online" && onlineRole === "p2") sendOnlineInput("fuga", aim);
+    if (fired && gameMode === "online" && onlineRole === "p2") sendOnlineInput("fuga", aim);
     return;
   }
   mouseTechniqueHeld[heldAction] = false;
@@ -6451,8 +6526,10 @@ function clearSpecialHoldState(f = null) {
   mouseTechniqueHeld.fuga = false;
   if (f) {
     f.teleportAiming = false;
-    f.fugaAiming = false;
-    f.fugaChargeTicks = 0;
+    if (!f.fugaReleaseQueued) {
+      f.fugaAiming = false;
+      f.fugaChargeTicks = 0;
+    }
   }
 }
 
@@ -6529,6 +6606,14 @@ function getFighterNetworkState(f) {
     shieldCooldown: f.shieldCooldown,
     shieldHitFlash: f.shieldHitFlash,
     health: f.health,
+    hurt: f.hurt || 0,
+    stun: f.stun || 0,
+    knockdown: Boolean(f.knockdown),
+    knockdownTimer: f.knockdownTimer || 0,
+    ko: Boolean(f.ko),
+    koTimer: f.koTimer || 0,
+    koRotation: f.koRotation || 0,
+    lying: Boolean(f.lying),
     maxHealth: f.maxHealth,
     healthBars: f.healthBars,
     delayedHealth: f.delayedHealth,
@@ -6538,6 +6623,10 @@ function getFighterNetworkState(f) {
     ultimateStartup: f.ultimateStartup,
     ultimateRecovery: f.ultimateRecovery,
     ultimateMove: f.ultimateMove,
+    ultimateAiming: Boolean(f.ultimateAiming),
+    ultimateAimTicks: f.ultimateAimTicks || 0,
+    ultimateFinalCharge: f.ultimateFinalCharge || 0,
+    ultimateAimPoint: f.ultimateAimPoint,
     ultimateHasReleased: f.ultimateHasReleased,
     damageTakenMultiplier: f.damageTakenMultiplier,
     knockbackTakenMultiplier: f.knockbackTakenMultiplier,
@@ -6699,6 +6788,9 @@ function sendOnlineState() {
 
   onlineSocket.send(JSON.stringify({
     type: "state",
+    stage: currentStageId,
+    hazards: stageHazardsEnabled,
+    stageHazards,
     player: playerState,
     enemy: enemyState,
     currentRound,
@@ -7359,7 +7451,7 @@ function ensureResourceBarLabel(frame, text, kind = "generic") {
     label.className = `resource-bar-label ${kind}-resource-label`;
     frame.parentElement.insertBefore(label, frame);
   }
-  label.textContent = text;
+  if (label.textContent !== text) label.textContent = text;
   frame.classList.add("labeled-resource-frame");
   return label;
 }
@@ -12591,6 +12683,7 @@ function prepareFuga(f, aimPoint = null) {
   f.techniqueAim = sanitizeAimPoint(aimPoint);
   f.fugaAiming = true;
   f.fugaChargeTicks = 0;
+  f.fugaReleaseQueued = false;
   mouseTechniqueHeld.fuga = f === getActiveMouseTechniqueFighter();
   return true;
 }
@@ -12763,6 +12856,12 @@ function startTechnique(f, slot, chargeRatio = 0, aimPoint = null, releasingChar
 
 function startFuga(f, aimPoint = null) {
   if (!f || f.technique !== "shrine") return false;
+  // A quick release queues the arrow instead of silently cancelling the move.
+  if (f.fugaAiming && canMaintainFugaCharge(f) && f.fugaChargeTicks < getFugaRequiredChargeTicks(f)) {
+    f.fugaReleaseQueued = true;
+    f.techniqueAim = sanitizeAimPoint(aimPoint) || f.techniqueAim;
+    return false;
+  }
   const move = "fuga";
   const spec = techniqueMoves.fuga;
   const cost = getTechniqueCost(f, move);
@@ -12779,6 +12878,7 @@ function startFuga(f, aimPoint = null) {
     (f.fugaChargeTicks || 0) >= getFugaRequiredChargeTicks(f);
   const canFuga = canReleaseAimedFuga;
   f.fugaAiming = false;
+  f.fugaReleaseQueued = false;
   if (!canFuga || !spec || f.ce < cost) {
     f.fugaChargeTicks = 0;
     return false;
@@ -13365,7 +13465,6 @@ function beginUltimateAim(f, aimPoint = null) {
     return false;
   }
   const kind = f.technique === "shrine" ? "worldSlash" : "hollowPurple";
-  triggerUltCutscene(f); // ULT_CUTSCENES_PATCH
   const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.techniqueAim) || mouseAimWorld;
   f.ultimateMove = kind;
   f.ultimateAiming = true;
@@ -13375,6 +13474,7 @@ function beginUltimateAim(f, aimPoint = null) {
   f.ultimateStartup = 0;
   f.ultimateRecovery = 0;
   f.ultimateHasReleased = false;
+  f.ultimateMeter = 0;
   f.attacking = null;
   f.attackFrame = 0;
   f.hasHit = false;
@@ -13398,23 +13498,18 @@ function cancelUltimateAim(f) {
 function releaseUltimateAim(f, aimPoint = null) {
   if (!f || !f.ultimateAiming) return false;
   const fullyCharged = (f.ultimateAimTicks || 0) >= ULT_AIM_HOLD_TICKS;
-  if (!fullyCharged) {
-    cancelUltimateAim(f);
-    return false;
-  }
+  if (!fullyCharged) return false;
   const aim = sanitizeAimPoint(aimPoint) || sanitizeAimPoint(f.ultimateAimPoint) || sanitizeAimPoint(f.techniqueAim) || mouseAimWorld;
   if (aim) setFighterTechniqueAim(f, aim);
   f.ultimateAimPoint = aim;
   f.ultimateAiming = false;
-  f.ultimateFinalCharge = 0;
+  f.ultimateFinalCharge = ULT_FINAL_CHARGE_TICKS;
   f.ultimateMeter = 0;
   f.ultimateHasReleased = false;
   f.blocking = false;
   ultimateFocusOwner = getFighterOwner(f);
-  cinematicZoomTicks = Math.max(cinematicZoomTicks, 18);
-  spawnUltimateChargeEffect(f, f.ultimateMove);
+  cinematicZoomTicks = Math.max(cinematicZoomTicks, ULT_FINAL_CHARGE_TICKS + 12);
   playUltimateChargeSound(f.ultimateMove);
-  releaseUltimate(f);
   updateHud();
   return true;
 }
@@ -13442,6 +13537,7 @@ function updateUltimateState(f) {
     f.ultimateAimTicks = Math.min(ULT_AIM_HOLD_TICKS, (f.ultimateAimTicks || 0) + 1);
     f.blocking = false;
     if (f.ultimateAimPoint) setFighterTechniqueAim(f, f.ultimateAimPoint);
+    if (f.ultimateAimTicks >= ULT_AIM_HOLD_TICKS) releaseUltimateAim(f, f.ultimateAimPoint);
     return;
   }
   if ((f.ultimateFinalCharge || 0) > 0) {
@@ -13808,8 +13904,9 @@ function startSimpleDomain(f) {
   f.rctHealing = false;
 
   const center = getFighterCenter(f);
-  spawnHitSpark(center.x, center.y, f.dir, "blue");
-  spawnHitSpark(center.x - f.dir * 26, center.y + 24, -f.dir, "blue");
+  const effect = f.technique === "shrine" ? "slash" : "blue";
+  spawnHitSpark(center.x, center.y, f.dir, effect);
+  spawnHitSpark(center.x - f.dir * 26, center.y + 24, -f.dir, effect);
   shake = Math.max(shake, 4);
   updateHud();
   return true;
@@ -16925,6 +17022,10 @@ function updateFighter(f, opponent) {
   if (f.fugaAiming) {
     f.fugaChargeTicks = Math.min(FUGA_CHARGE_TICKS, (f.fugaChargeTicks || 0) + 1);
     f.blocking = false;
+    if (f.fugaReleaseQueued && f.fugaChargeTicks >= getFugaRequiredChargeTicks(f)) {
+      const aim = f.techniqueAim;
+      if (startFuga(f, aim) && isOnlineJoinerControlledFighter(f)) sendOnlineInput("fuga", aim);
+    }
   }
   if (f.chargingTechnique) {
     if (f.ko || f.blocking || f.dodging > 0) {
@@ -17041,6 +17142,7 @@ function updateStage() {
     p.y = p.baseY + Math.cos(frame * m.sy + m.phase) * m.ay;
   }
   const stage = getStage();
+  if (gameMode === "online" && onlineRole !== "p1") return;
   if (stageHazardsEnabled && stage.hazard && gameState === "playing" && !gameOver && !paused) {
     stageHazardTimer -= 1;
     if (stageHazardTimer <= 0) {
@@ -19731,70 +19833,13 @@ function shouldShowUltimateAimPreview(f) {
 
 function drawUltimateAimPreview(f) {
   if (!shouldShowUltimateAimPreview(f)) return;
-  const kind = f.ultimateMove || (f.technique === "shrine" ? "worldSlash" : "hollowPurple");
-  const moveForAim = kind === "worldSlash" ? "slash" : "blue";
-  const aimVector = getTechniqueAimVector(f, moveForAim, f.ultimateAimPoint || f.techniqueAim || mouseAimWorld);
-  const center = getFighterCenter(f);
-  const chargeRatio = Math.max(0, Math.min(1, (f.ultimateAimTicks || 0) / ULT_AIM_HOLD_TICKS));
-  const previewRange = STAGE_W * 0.9;
-  const endX = aimVector.origin.x + aimVector.x * previewRange;
-  const endY = aimVector.origin.y + aimVector.y * previewRange;
-  const pulse = 1 + Math.sin(frame * 0.22) * 0.07;
-
-  ctx.save();
-  ctx.globalAlpha = ULT_AIM_PREVIEW_ALPHA;
-  ctx.lineCap = "round";
-  ctx.setLineDash([22, 14]);
-  ctx.strokeStyle = kind === "worldSlash" ? "rgba(255, 255, 255, 0.9)" : "rgba(216, 180, 254, 0.9)";
-  ctx.lineWidth = kind === "worldSlash" ? 8 : 6;
-  ctx.beginPath();
-  ctx.moveTo(aimVector.origin.x, aimVector.origin.y);
-  ctx.lineTo(endX, endY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  ctx.translate(endX, endY);
-  ctx.rotate(aimVector.angle);
-  if (kind === "worldSlash") {
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.lineWidth = 8;
-    ctx.beginPath();
-    ctx.arc(0, 0, 48, -Math.PI * 0.7, Math.PI * 0.7);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(2, 6, 23, 0.96)";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(5, 0, 42, -Math.PI * 0.66, Math.PI * 0.66);
-    ctx.stroke();
-  } else {
-    ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, 84);
-    glow.addColorStop(0, "rgba(255,255,255,0.9)");
-    glow.addColorStop(0.35, "rgba(216,180,254,0.75)");
-    glow.addColorStop(1, "rgba(124,58,237,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(0, 0, 84, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.translate(center.x, center.y - 10);
-  ctx.globalAlpha = 0.92;
-  ctx.strokeStyle = chargeRatio >= 1 ? "rgba(255,255,255,0.95)" : kind === "worldSlash" ? "rgba(248,250,252,0.78)" : "rgba(216,180,254,0.78)";
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.arc(0, 0, 58 * pulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * chargeRatio);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(2,6,23,0.44)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(0, 0, 66 * pulse, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
+  const aim = getTechniqueAimVector(f, f.technique === "shrine" ? "slash" : "blue", f.ultimateAimPoint || f.techniqueAim);
+  ctx.save();ctx.globalAlpha=.45;ctx.lineWidth=2;ctx.setLineDash([10,12]);
+  ctx.strokeStyle=f.technique === "shrine" ? "#f5a398" : "#c4a1ff";
+  ctx.beginPath();ctx.moveTo(aim.origin.x,aim.origin.y);
+  ctx.lineTo(aim.origin.x+aim.x*STAGE_W,aim.origin.y+aim.y*STAGE_W);ctx.stroke();ctx.restore();
 }
+
 
 function drawTeleportEffects() {
   for (const effect of teleportEffects) drawTeleportMotion(effect);
@@ -20459,6 +20504,10 @@ function drawBindingVowEffect(f) {
 
 function drawSimpleDomainEffect(f) {
   if (!hasSimpleDomain(f)) return;
+  if (f.technique === "shrine") {
+    drawSukunaSimpleDomain(f);
+    return;
+  }
 
   const center = getFighterCenter(f);
   const progress = Math.max(0, Math.min(1, (f.simpleDomainTicks || 0) / SIMPLE_DOMAIN_TICKS));
@@ -27308,11 +27357,11 @@ window.addEventListener("keyup", (event) => {
     if (active?.fugaAiming) {
       if (isOnlineJoinerControlledFighter(active)) {
         active.techniqueAim = sanitizeAimPoint(active?.techniqueAim || mouseAimWorld) || active.techniqueAim;
-        active.fugaChargeTicks = Math.max(active.fugaChargeTicks || 0, getFugaRequiredChargeTicks(active));
       }
-      startFuga(active, active?.techniqueAim || mouseAimWorld);
+      const aim = active.techniqueAim || mouseAimWorld;
+      const fired = startFuga(active, aim);
       clearSpecialHoldState(active);
-      if (gameMode === "online" && onlineRole === "p2") sendOnlineInput("fuga", active?.techniqueAim || mouseAimWorld);
+      if (fired && gameMode === "online" && onlineRole === "p2") sendOnlineInput("fuga", aim);
       return;
     }
     if (active?.teleportAiming) {
@@ -28866,18 +28915,6 @@ function drawWorldSlashEffects() {
     `;
     document.head.appendChild(s);
   }
-  function refresh() {
-    document.querySelectorAll(".stage-chip").forEach((c) => {
-      c.classList.toggle("active", c.dataset.stage === currentStageId);
-    });
-    const cb = document.getElementById("stageHazardToggle");
-    if (cb) cb.checked = stageHazardsEnabled;
-  }
-  function syncOnline() {
-    if (gameMode === "online" && typeof sendOnlineTechniqueChoice === "function" && onlineSocket && onlineSocket.readyState === 1) {
-      try { onlineSocket.send(JSON.stringify({ type: "stage", role: onlineRole, stage: currentStageId, hazards: stageHazardsEnabled })); } catch (e) {}
-    }
-  }
   function build() {
     const panel = document.querySelector("#techniqueScreen .technique-panel");
     if (!panel || document.getElementById("stageStrip")) return;
@@ -28893,7 +28930,7 @@ function drawWorldSlashEffects() {
       chip.className = "stage-chip";
       chip.dataset.stage = id;
       chip.innerHTML = `<span class="sw" style="background:${SWATCH[id] || "#333"}"></span>${STAGES[id].name}`;
-      chip.addEventListener("click", () => { currentStageId = id; refresh(); syncOnline(); });
+      chip.addEventListener("click", () => chooseStage(id));
       strip.appendChild(chip);
     });
     const hazardRow = document.createElement("div");
@@ -28909,9 +28946,9 @@ function drawWorldSlashEffects() {
       panel.appendChild(title); panel.appendChild(strip); panel.appendChild(hazardRow);
     }
     hazardRow.querySelector("#stageHazardToggle").addEventListener("change", (e) => {
-      stageHazardsEnabled = e.target.checked; syncOnline();
+      chooseStage(currentStageId, e.target.checked);
     });
-    refresh();
+    updateStageSelectionControls();
   }
   function init() {
     injectStyle();

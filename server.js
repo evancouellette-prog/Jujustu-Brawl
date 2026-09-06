@@ -32,7 +32,7 @@ function safeFilePath(urlPath) {
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, {"Content-Type":"application/json", "Cache-Control":"no-store"});
-    res.end(JSON.stringify({status:"ok",release:"skins-radio-20260906"}));
+    res.end(JSON.stringify({status:"ok",release:"combat-sessions-20260906"}));
     return;
   }
   const filePath = safeFilePath(req.url);
@@ -194,11 +194,8 @@ wss.on("connection", (ws, req) => {
   const requestedSide = requestUrl.searchParams.get("side");
   const requestedCode = String(requestUrl.searchParams.get("room") || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
   const existing = rooms.get(requestedCode);
-  if (requestedSide === "join" && (!existing?.p1 || existing.p1.readyState !== ws.OPEN)) {
-    send(ws, {type:"room-error",code:"not-found",message:"No host is using that code. Check the code with your friend and try again."});
-    ws.close(1008,"Host not found");
-    return;
-  }
+  // Reserve P2 before P1 arrives. Room broadcasts release both players from
+  // the waiting screen once the host opens the same room code.
   if ((requestedSide === "host" && existing?.p1?.readyState === ws.OPEN) ||
       (requestedSide === "join" && existing?.p2?.readyState === ws.OPEN)) {
     send(ws, {type:"room-error",code:"full",message:"That spot is already taken. Use another battle code."});

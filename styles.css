@@ -2008,6 +2008,42 @@ button.hidden {
   gap: 8px;
 }
 
+.movesets-screen {
+  position: fixed; inset: 0; z-index: 10000; background: rgba(4,8,16,.9);
+  display: grid; place-items: center; padding: 20px; font-family: Arial, sans-serif;
+}
+.movesets-screen.hidden { display: none; }
+.movesets-panel {
+  width: min(960px,100%); max-height: 92dvh; overflow: auto; padding: 24px;
+  background: #101827; border: 1px solid #8e7749; border-radius: 16px; color: #edf2f7;
+}
+.movesets-panel header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.movesets-panel h2 { margin: 0 0 16px; color: #f3d08a; }
+.movesets-panel nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.movesets-panel button { min-height: 40px; padding: 8px 12px; border: 1px solid #697486; border-radius: 8px; background: #202c40; color: #fff; cursor: pointer; }
+.movesets-panel button[aria-pressed="true"] { background: #f0c778; color: #172033; border-color: #f0c778; }
+.movesets-panel button:focus-visible { outline: 3px solid #98ceff; outline-offset: 3px; }
+.moveset-profile { display: flex; align-items: center; gap: 22px; margin: 20px 0; }
+.moveset-profile canvas { flex: 0 0 150px; width: 150px; height: 134px; background: #172438; border-radius: 12px; }
+.moveset-profile h3 { font-size: 26px; margin: 0 0 14px; }
+.moveset-profile h4 { margin: 0 0 6px; color: #f0c778; }
+#movesetPassive { min-height: 1.5em; margin: 0; line-height: 1.5; max-width: 650px; }
+#movesetBasics { color: #b6c5db; line-height: 1.7; }
+.moveset-table { overflow-x: auto; }
+.moveset-table table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.moveset-table th { color: #f0c778; background: #1c283c; }
+.moveset-table th, .moveset-table td { padding: 12px; border-bottom: 1px solid #334155; line-height: 1.45; }
+.moveset-table td:first-child { white-space: nowrap; color: #bfd8f3; }
+.stage-chip:disabled { cursor: default; opacity: .55; }
+@media (max-width: 600px) {
+  .movesets-screen { padding: 8px; }
+  .movesets-panel { padding: 14px; max-height: 96dvh; }
+  .moveset-profile { gap: 12px; align-items: flex-start; }
+  .moveset-profile canvas { flex-basis: 90px; width: 90px; height: 80px; }
+  .moveset-profile h3 { font-size: 22px; }
+  .moveset-table th, .moveset-table td { padding: 9px; }
+}
+
 .music-progress-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
