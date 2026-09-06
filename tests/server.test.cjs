@@ -17,12 +17,15 @@ function client(url){
  return ws;
 }
 
-test('host/join relay handles wrong codes, full rooms, metadata, compression and a vacated slot',async t=>{
+test('joiners can arrive before hosts; relay enforces room slots and host-only stage settings',async t=>{
  server.listen(0,'127.0.0.1');await once(server,'listening');
  const url=`ws://127.0.0.1:${server.address().port}/ws`;
  const clients=[];const open=(room,side)=>{const ws=client(`${url}?room=${room}&side=${side}`);clients.push(ws);return ws;};
  t.after(async()=>{for(const ws of clients)ws.terminate();for(const ws of wss.clients)ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>server.close(resolve));});
- const missing=open('missing','join');assert.equal((await missing.next(p=>p.type==='room-error')).code,'not-found');assert.equal(rooms.has('missing'),false);
+ const early=open('early','join');assert.equal((await early.next(p=>p.type==='role')).role,'p2');
+ assert.deepEqual((await early.next(p=>p.type==='room')).players,{p1:0,p2:1});
+ const laterHost=open('early','host');assert.equal((await laterHost.next(p=>p.type==='role')).role,'p1');
+ assert.deepEqual((await early.next(p=>p.type==='room'&&p.players.p1===1)).players,{p1:1,p2:1});
  const host=open('regression','host');assert.equal((await host.next(p=>p.type==='role')).role,'p1');
  host.send(JSON.stringify({type:'name',role:'p1',name:'Host Test'}));
  host.send(JSON.stringify({type:'technique',role:'p1',technique:'shrine',skinId:'shibuya'}));
@@ -32,6 +35,12 @@ test('host/join relay handles wrong codes, full rooms, metadata, compression and
  assert.equal((await join.next(p=>p.type==='technique')).skinId,'shibuya');
  const full=open('regression','join');assert.equal((await full.next(p=>p.type==='room-error')).code,'full');
  join.send(JSON.stringify({type:'input',input:{right:true},action:'light'}));assert.equal((await host.next(p=>p.type==='input')).action,'light');
+ join.send(JSON.stringify({type:'stage',role:'p1',stage:'space',hazards:true}));
+ join.send(JSON.stringify({type:'input',action:'stage-check'}));await host.next(p=>p.action==='stage-check');
+ assert.equal(rooms.get('regression').metadata.has('p2:stage'),false);
+ assert.equal(host.inbox.some(p=>p.type==='stage'),false);
+ host.send(JSON.stringify({type:'stage',role:'p1',stage:'zen',hazards:false}));
+ assert.equal((await join.next(p=>p.type==='stage')).stage,'zen');
  assert.ok(host.extensions.includes('permessage-deflate'));assert.ok(join.extensions.includes('permessage-deflate'));
  const g=loadGame();const state=g.run(`({type:'state',player:getFighterNetworkState(player),enemy:getFighterNetworkState(enemy),projectiles:[]})`);g.close();
  const start=join._socket.bytesRead;let rawBytes=0;

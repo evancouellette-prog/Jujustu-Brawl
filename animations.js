@@ -147,6 +147,7 @@ function beginCastMotion(f,move,angle=0) {
 function getSorcererCast(f) {
   if(!f||!['limitless','shrine'].includes(f.technique)||f.ko||f.stun>0||f.blocking||f.attacking)return null;
   if(f.domainStartup>0)return {move:'domain',charge:clamp01(1-f.domainStartup/DOMAIN_STARTUP_TICKS),release:0};
+  if(f.technique==='shrine'&&f.simpleDomainFlash>0)return {move:'simpleDomain',charge:1,release:0};
   if(f.ultimateAiming||f.ultimateFinalCharge>0||f.ultimateStartup>0)return {move:f.technique==='shrine'?'worldSlash':'purple',charge:clamp01((f.ultimateAimTicks||0)/ULT_AIM_HOLD_TICKS),release:0};
   if(f.fugaAiming)return {move:'fuga',charge:clamp01(f.fugaChargeTicks/getFugaRequiredChargeTicks(f)),release:0};
   if(f.teleportAiming)return {move:'teleport',charge:1,release:0};
@@ -183,12 +184,13 @@ function drawSorcererCastArms(f,drawArm,skin) {
   if(move==='domain'||move==='teleport') {right.x=31;right.y=36;left.x=25;left.y=49;}
   else if(move==='fuga'){right.x=70;right.y=47;left.x=lerp(35,12,charge);left.y=43;}
   else if(move==='purple'){right.x=lerp(55,42,charge);right.y=48;left.x=lerp(7,29,charge);left.y=48;}
-  else if(move==='worldSlash'){right.x=59;right.y=34;left.x=30;left.y=47;}
+  else if(move==='worldSlash'){right.x=73;right.y=50;left.x=29;left.y=53;}
+  else if(move==='simpleDomain'){right.x=34;right.y=73;left.x=21;left.y=73;}
   else if(move==='slash'||move==='cleave'){right.x=activeRelease?lerp(76,49,motionEase(release)):39;right.y=activeRelease?lerp(42,79,motionEase(release)):29;left.x=15;left.y=61;}
   if(activeRelease&&['blue','red','purple','fuga','worldSlash'].includes(move)) {right.x+=12*(1-release);left.x-=6*(1-release);}
   right.x=lerp(46,right.x,fade);right.y=lerp(81,right.y,fade);left.x=lerp(7,left.x,fade);left.y=lerp(81,left.y,fade);
   const bowHandX=left.x,bowHandY=left.y;
-  const aimed=!['domain','teleport'].includes(move);
+  const aimed=!['domain','teleport','simpleDomain'].includes(move);
   const aimMove=['purple','worldSlash'].includes(move)?(f.technique==='shrine'?'slash':'blue'):move;
   const worldAngle=activeRelease?f.castPoseAngle:getTechniqueAimVector(f,aimMove,f.ultimateAimPoint||f.techniqueAim).angle;
   const aimAngle=aimed?Math.atan2(Math.sin(worldAngle||0),Math.cos(worldAngle||0)*(f.dir||1)):0;
@@ -197,24 +199,35 @@ function drawSorcererCastArms(f,drawArm,skin) {
     point.x=26+dx*Math.cos(aimAngle)-dy*Math.sin(aimAngle);
     point.y=50+dx*Math.sin(aimAngle)+dy*Math.cos(aimAngle);
   }
-  drawArm({x:42,y:50},{x:(42+right.x)/2+5,y:(50+right.y)/2+5},right);
-  drawArm({x:11,y:51},{x:(11+left.x)/2-4,y:(51+left.y)/2+8},left);
+  const front=solvePunchArm({x:42,y:50},right),back=solvePunchArm({x:11,y:51},left);
+  Object.assign(right,front.fist);Object.assign(left,back.fist);
+  drawArm(front.shoulder,front.elbow,right);
+  drawArm(back.shoulder,back.elbow,left);
   if(f.technique==='shrine'&&skinOf(f)!=='shibuya'){
-    const sign=move==='domain'||move==='worldSlash';
+    const sign=move==='domain'||move==='worldSlash'||move==='simpleDomain';
     drawArm({x:43,y:64},{x:sign?37:51,y:75},{x:sign?28:47,y:sign?70:87},skin.skin);
     drawArm({x:10,y:65},{x:sign?19:2,y:76},{x:sign?26:8,y:sign?71:88},skin.skin);
   }
   ctx.save();ctx.globalAlpha=fade;
   // Finger signs are attached to the wrist; the faces stay featureless.
-  if(['domain','teleport','blue','red','worldSlash'].includes(move)){
+  if(move==='worldSlash') {
+    ctx.strokeStyle=skin.skin;ctx.lineWidth=2.6;ctx.lineCap='round';ctx.beginPath();
+    ctx.moveTo(right.x,right.y);ctx.lineTo(right.x+Math.cos(aimAngle)*13,right.y+Math.sin(aimAngle)*13);ctx.stroke();
+  } else if(['domain','teleport','blue','red'].includes(move)){
     ctx.strokeStyle=skin.skin;ctx.lineWidth=2.6;ctx.lineCap='round';ctx.beginPath();
     ctx.moveTo(right.x-1,right.y);ctx.lineTo(right.x+2,right.y-10);ctx.moveTo(right.x+2,right.y);ctx.lineTo(right.x+5,right.y-9);ctx.stroke();
   }
   if(!activeRelease){
     if(move==='blue'||move==='red')drawEnergyCore(right.x+10,right.y-6,4+charge*8,move);
     if(move==='purple'){
-      drawEnergyCore(right.x+4,right.y-9,5+charge*4,'red');drawEnergyCore(left.x-4,left.y-9,5+charge*4,'blue',-frame*.09);
-      if(charge>.65)drawEnergyCore(35,39,2+(charge-.65)*26,'purple');
+      const split=30*(1-motionEase(charge));
+      ctx.save();ctx.translate(26,50);ctx.rotate(aimAngle);ctx.translate(-26,-50);
+      if(charge<1) {
+        drawEnergyCore(76,48-split,10*(1-motionEase((charge-.78)/.22)),'red');
+        drawEnergyCore(76,48+split,10*(1-motionEase((charge-.78)/.22)),'blue',-frame*.09);
+      }
+      if(charge>.65)drawEnergyCore(76,48,22*motionEase((charge-.65)/.35),'purple');
+      ctx.restore();
     }
     if(move==='fuga'){
       ctx.save();ctx.translate(26,50);ctx.rotate(aimAngle);ctx.translate(-26,-50);
@@ -232,6 +245,26 @@ function drawSorcererCastArms(f,drawArm,skin) {
 function drawGojoHandEnergy(f,hand) {
   if(f.technique!=='limitless'||!isBluePunchActive(f))return;
   ctx.save();ctx.globalAlpha=.75;drawEnergyCore(hand.x,hand.y,7,'blue');ctx.restore();
+}
+
+function drawSukunaSimpleDomain(f) {
+  const cx=f.x+f.w/2, feet=f.y+f.h-2;
+  const opening=motionEase(1-(f.simpleDomainFlash||0)/18);
+  const fade=Math.min(1,f.simpleDomainTicks/24),r=lerp(24,84,opening);
+  ctx.save();ctx.globalAlpha=fade;ctx.lineCap='round';
+  const aura=ctx.createRadialGradient(cx,feet,8,cx,feet,r);
+  aura.addColorStop(0,'rgba(112,34,39,.04)');aura.addColorStop(.8,'rgba(196,62,56,.13)');aura.addColorStop(1,'rgba(196,62,56,0)');
+  ctx.fillStyle=aura;ctx.beginPath();ctx.ellipse(cx,feet,r,25,0,0,Math.PI*2);ctx.fill();
+  for(const [scale,color,width] of [[1,'#dfa38e',2.5],[.87,'#772d35',4],[1.1,'rgba(247,215,187,.3)',1]]) {
+    ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.ellipse(cx,feet,r*scale,25*scale,0,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.strokeStyle='#f4c6a3';ctx.lineWidth=1.5;
+  for(let i=0;i<12;i++) {
+    const angle=i*Math.PI/6;
+    ctx.beginPath();ctx.moveTo(cx+Math.cos(angle)*r*.8,feet+Math.sin(angle)*20);
+    ctx.lineTo(cx+Math.cos(angle)*r*.95,feet+Math.sin(angle)*24);ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawSorcererProjectile(p) {
